@@ -1,0 +1,153 @@
+{
+  "findings": [
+    {
+      "category": "SCA",
+      "path": "build.gradle.kts",
+      "severity": "CRITICAL",
+      "description": "Версия зависимости входит в уязвимый диапазон",
+      "remediation": "Обновите зависимость до исправленной версии. Исправленные версии по справочнику: 1.10.0.",
+      "group": "org.apache.commons",
+      "artifact": "commons-text",
+      "version": "1.9",
+      "advisoryId": "CVE-2022-42889"
+    },
+    {
+      "category": "SCA",
+      "path": "build.gradle.kts",
+      "severity": "HIGH",
+      "description": "Версия зависимости входит в уязвимый диапазон",
+      "remediation": "Обновите зависимость до исправленной версии. Исправленные версии по справочнику: 1.14.2.",
+      "group": "org.jsoup",
+      "artifact": "jsoup",
+      "version": "1.14.1",
+      "advisoryId": "CVE-2021-37714"
+    },
+    {
+      "category": "SCA",
+      "path": "build.gradle.kts",
+      "severity": "MEDIUM",
+      "description": "Версия зависимости входит в уязвимый диапазон",
+      "remediation": "Обновите зависимость до исправленной версии. Исправленные версии по справочнику: 1.26.0.",
+      "group": "org.apache.commons",
+      "artifact": "commons-compress",
+      "version": "1.25.0",
+      "advisoryId": "CVE-2024-25710"
+    },
+    {
+      "category": "SCA",
+      "path": "build.gradle.kts",
+      "severity": "MEDIUM",
+      "description": "Версия зависимости входит в уязвимый диапазон",
+      "remediation": "Обновите зависимость до исправленной версии. Исправленные версии по справочнику: 3.9.0.",
+      "group": "commons-net",
+      "artifact": "commons-net",
+      "version": "3.8.0",
+      "advisoryId": "CVE-2021-37533"
+    },
+    {
+      "category": "SCA",
+      "path": "build.gradle.kts",
+      "severity": "HIGH",
+      "description": "Версия зависимости входит в уязвимый диапазон",
+      "remediation": "Обновите зависимость до исправленной версии. Исправленные версии по справочнику: 20231013.",
+      "group": "org.json",
+      "artifact": "json",
+      "version": "20230227",
+      "advisoryId": "CVE-2023-5072"
+    },
+    {
+      "category": "SAST",
+      "path": "src/main/kotlin/lab/repairdesk/config/RepairCors.kt",
+      "severity": "MEDIUM",
+      "description": "CORS разрешает любой origin вместе с учётными данными",
+      "remediation": "Укажите доверенные origin и включайте credentials только для нужных маршрутов.",
+      "class": "credentialed-cors",
+      "line": 13,
+      "endLine": 14
+    },
+    {
+      "category": "SAST",
+      "path": "src/main/kotlin/lab/repairdesk/config/RepairSecurity.kt",
+      "severity": "HIGH",
+      "description": "Публичное правило срабатывает раньше ограничения доступа к маршруту",
+      "remediation": "Согласуйте порядок правил Spring Security с политикой доступа и проверьте роль на маршруте.",
+      "class": "route-authorization",
+      "line": 18
+    },
+    {
+      "category": "SECRET",
+      "path": "src/main/kotlin/lab/repairdesk/integration/DepotStatusClient.kt",
+      "severity": "LOW",
+      "description": "Секрет хранится как значение по умолчанию",
+      "remediation": "Передавайте секрет из окружения или хранилища, удалите литерал и замените действующий секрет.",
+      "class": "secret-fallback",
+      "line": 8
+    },
+    {
+      "category": "SECRET",
+      "path": "src/main/kotlin/lab/repairdesk/integration/PartsImportSettings.kt",
+      "severity": "HIGH",
+      "description": "Пароль задан строковым литералом",
+      "remediation": "Передавайте секрет из окружения или хранилища, удалите литерал и замените действующий секрет.",
+      "class": "password",
+      "line": 4
+    },
+    {
+      "category": "SECRET",
+      "path": "src/main/kotlin/lab/repairdesk/integration/QuoteRequest.kt",
+      "severity": "MEDIUM",
+      "description": "Ключ API задан строковым литералом",
+      "remediation": "Передавайте секрет из окружения или хранилища, удалите литерал и замените действующий секрет.",
+      "class": "api-key",
+      "line": 7
+    },
+    {
+      "category": "SAST",
+      "path": "src/main/kotlin/lab/repairdesk/integration/SupplierHttpsClient.kt",
+      "severity": "MEDIUM",
+      "description": "Клиент принимает любое имя TLS-хоста",
+      "remediation": "Оставьте штатную проверку имени хоста при TLS-соединении.",
+      "class": "tls-verification",
+      "line": 13
+    },
+    {
+      "category": "SECRET",
+      "path": "src/main/kotlin/lab/repairdesk/integration/WarrantyHeaders.kt",
+      "severity": "MEDIUM",
+      "description": "Токен для заголовка собирается из литералов",
+      "remediation": "Передавайте секрет из окружения или хранилища, удалите литерал и замените действующий секрет.",
+      "class": "recoverable-token",
+      "line": 7,
+      "endLine": 10
+    },
+    {
+      "category": "SAST",
+      "path": "src/main/kotlin/lab/repairdesk/repair/RepairLookupController.kt",
+      "severity": "HIGH",
+      "description": "Параметр запроса подставляется в SQL-шаблон",
+      "remediation": "Передавайте параметры в JDBC отдельно от текста SQL.",
+      "class": "sql-injection",
+      "line": 13,
+      "endLine": 14
+    },
+    {
+      "category": "SAST",
+      "path": "src/main/kotlin/lab/repairdesk/repair/RepairTicketReader.kt",
+      "severity": "HIGH",
+      "description": "Идентификатор из маршрута читает запись без проверки её владельца",
+      "remediation": "Фильтруйте запись по идентификатору и владельцу из контекста аутентификации.",
+      "class": "object-authorization",
+      "line": 10,
+      "endLine": 11
+    },
+    {
+      "category": "SECRET",
+      "path": "src/main/resources/application.yml",
+      "severity": "HIGH",
+      "description": "Токен задан строковым литералом",
+      "remediation": "Передавайте секрет из окружения или хранилища, удалите литерал и замените действующий секрет.",
+      "class": "configuration-token",
+      "line": 13
+    }
+  ]
+}

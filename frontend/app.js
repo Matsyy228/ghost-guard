@@ -55,7 +55,7 @@ function findingElement(finding) {
   const heading = node("div", "", "finding-heading");
   heading.append(severity, node("strong", finding.title));
   const location = [scannerNames[finding.scanner], `${finding.file}:${finding.line}`];
-  if (finding.cve) location.push(finding.cve, `${finding.package}@${finding.version}`);
+  if (finding.advisoryId || finding.cve) location.push(finding.advisoryId || finding.cve, `${finding.package}@${finding.version}`);
   const item = node("li", "");
   item.append(heading, node("p", location.join(" · "), "finding-location"),
     node("p", finding.recommendation, "finding-recommendation"));
@@ -184,5 +184,9 @@ elements["upload-mode"].addEventListener("click", () => setMode("upload"));
 elements["scan-form"].addEventListener("submit", runScan);
 elements.severity.addEventListener("change", renderReport);
 elements.download.addEventListener("click", downloadReport);
+elements["launch-help"].hidden = true;
+elements.run.disabled = false;
+elements.connection.dataset.status = "pending";
+elements.connection.textContent = "Проверка подключения";
 void checkConnection();
 window.addEventListener("focus", checkConnection);

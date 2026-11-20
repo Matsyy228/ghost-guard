@@ -12,7 +12,7 @@
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand"><span class="brand-mark" aria-hidden="true"></span>GHOST//GUARD</div>
-      <span id="connection" class="connection" data-status="pending" role="status">Проверка подключения</span>
+      <span id="connection" class="connection" role="status">Откройте через локальный сервер</span>
     </div>
   </header>
 
@@ -42,7 +42,8 @@
             <input id="catalog" name="catalog" type="file" accept=".json,application/json">
           </div>
 
-          <button type="submit" id="run" class="primary">Запустить проверку</button>
+          <p id="launch-help" class="launch-help">Запустите в VS Code задачу <strong>Start app (frontend + backend)</strong> и откройте <a href="http://127.0.0.1:5173/">127.0.0.1:5173</a>.</p>
+          <button type="submit" id="run" class="primary" disabled>Запустить проверку</button>
           <p id="error" class="error" role="alert" hidden></p>
         </form>
       </section>

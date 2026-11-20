@@ -10,7 +10,7 @@ const severityOptions = [
 ];
 const fieldOptions = [
   ["file", "Файл"], ["severity", "Критичность"], ["scanner", "Сканер"], ["rule", "Правило"],
-  ["line", "Строка"], ["cve", "CVE"], ["package", "Зависимость"],
+  ["line", "Строка"], ["cve", "CVE"], ["advisoryId", "CVE или GHSA"], ["package", "Зависимость"],
 ];
 const modes = [["severity", "Порог критичности"], ["compare", "Сравнение"], ["regex", "Регулярное выражение"]];
 const operators = [["eq", "Равно"], ["ne", "Не равно"], ["gt", "Больше"], ["gte", "Не меньше"], ["lt", "Меньше"], ["lte", "Не больше"]];

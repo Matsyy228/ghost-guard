@@ -50,7 +50,8 @@ def extract_sources(data, root):
                 if mode not in {0, stat.S_IFREG, stat.S_IFDIR} or entry.flag_bits & 1:
                     raise InvalidInput("ZIP содержит ссылку, специальный или зашифрованный файл.")
                 path = root.joinpath(*parts)
-                if entry.is_dir() or path.suffix not in SOURCE_EXTENSIONS or scan.SKIP_DIRS.intersection(parts[:-1]):
+                supported = path.suffix in SOURCE_EXTENSIONS or path.name == "gradle.lockfile"
+                if entry.is_dir() or not supported or scan.SKIP_DIRS.intersection(parts[:-1]):
                     continue
                 key = tuple(part.casefold() for part in parts)
                 if key in paths:

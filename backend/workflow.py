@@ -18,7 +18,7 @@ MAX_EDGES = 48
 NODE_TYPES = scan.SCANNERS | {"trigger", "condition", "report"}
 NODE_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}")
 SEVERITY_RANK = {level: rank for rank, level in enumerate(("low", "medium", "high", "critical"))}
-FIELDS = {"scanner", "severity", "file", "rule", "cve", "package", "line"}
+FIELDS = {"scanner", "severity", "file", "rule", "cve", "advisoryId", "package", "line"}
 COMPARISONS = {
     "eq": operator.eq, "ne": operator.ne, "gt": operator.gt,
     "gte": operator.ge, "lt": operator.lt, "lte": operator.le,
@@ -156,7 +156,7 @@ def combined_report(types, results):
         result = results[kind]
         findings.extend(result["findings"])
         skipped.update((item["file"], item) for item in result["skipped_files"])
-    findings.sort(key=lambda item: (item["file"], item["line"], item["rule"], item.get("cve", "")))
+    findings.sort(key=lambda item: (item["file"], item["line"], item["rule"], item.get("advisoryId", "")))
     return {
         "findings": findings,
         "skipped_files": list(skipped.values()),
