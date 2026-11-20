@@ -1,0 +1,43 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start backend",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": ["-B", "-u", "-m", "backend.server"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "workflow" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Start frontend",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": ["-B", "-u", "-m", "http.server", "5173", "--bind", "127.0.0.1", "--directory", "frontend"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "workflow" },
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "python-http-server",
+        "fileLocation": "absolute",
+        "pattern": {
+          "regexp": "^\\s*File \"(.+)\", line (\\d+)(.*)$",
+          "file": 1,
+          "line": 2,
+          "message": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^Serving HTTP on ",
+          "endsPattern": "^Serving HTTP on 127\\.0\\.0\\.1 port 5173 "
+        }
+      }
+    },
+    {
+      "label": "Start app (frontend + backend)",
+      "dependsOn": ["Start frontend", "Start backend"],
+      "problemMatcher": []
+    }
+  ]
+}

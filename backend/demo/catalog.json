@@ -1,0 +1,8 @@
+[
+  {
+    "package": "example.training:demo-library",
+    "cve": "CVE-2099-12345",
+    "severity": "medium",
+    "ranges": [{ "min_inclusive": "1.0", "max_exclusive": "2.0" }]
+  }
+]

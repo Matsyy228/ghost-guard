@@ -1,0 +1,7 @@
+spring:
+  datasource:
+    password: fake-demo-value
+
+server:
+  error:
+    include-stacktrace: always

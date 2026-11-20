@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>GHOST//GUARD</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" type="module"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span>GHOST//GUARD</div>
+      <span id="connection" class="connection" data-status="pending" role="status">Проверка подключения</span>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <div class="page-heading">
+      <h1>Проверка проекта</h1>
+      <p>Соберите проверку Kotlin-проекта перед релизом и увидьте, какие находки повлияли на решение.</p>
+    </div>
+
+    <div class="workspace-grid">
+      <section class="panel inputs" aria-labelledby="inputs-title">
+        <header class="panel-header"><h2 id="inputs-title">Входные данные</h2></header>
+        <form id="scan-form">
+          <div class="mode-switch" role="group" aria-label="Источник проекта">
+            <button type="button" id="demo-mode" aria-pressed="true">Демо</button>
+            <button type="button" id="upload-mode" aria-pressed="false">Мой ZIP</button>
+          </div>
+
+          <div id="demo-input" class="demo-info">
+            <strong>Учебный проект</strong>
+            <p>Синтетические данные для проверки всех трёх сканеров.</p>
+          </div>
+          <div id="upload-inputs" class="upload-inputs" hidden>
+            <label for="project">Архив проекта <span>ZIP до 8 МиБ</span></label>
+            <input id="project" name="project" type="file" accept=".zip,application/zip">
+            <label for="catalog">Справочник SCA <span>JSON, необязательно</span></label>
+            <input id="catalog" name="catalog" type="file" accept=".json,application/json">
+          </div>
+
+          <button type="submit" id="run" class="primary">Запустить проверку</button>
+          <p id="error" class="error" role="alert" hidden></p>
+        </form>
+      </section>
+
+      <section class="panel workflow" aria-labelledby="workflow-title">
+        <header class="panel-header">
+          <h2 id="workflow-title">Сценарий</h2>
+          <span id="run-status" class="run-status" role="status">Готов к запуску</span>
+        </header>
+        <div class="graph-toolbar">
+          <label class="visually-hidden" for="node-type">Тип блока</label>
+          <select id="node-type">
+            <option value="secrets">Secrets</option>
+            <option value="sca">SCA</option>
+            <option value="sast">SAST</option>
+            <option value="condition">Условие</option>
+            <option value="report">Отчёт</option>
+          </select>
+          <button type="button" id="add-node" class="secondary">Добавить блок</button>
+          <button type="button" id="reset-graph" class="secondary">Вернуть шаблон</button>
+        </div>
+        <p id="graph-hint" class="graph-hint" role="status">Для связи нажмите выход блока, затем вход другого блока.</p>
+        <div id="graph-viewport" class="graph-viewport" tabindex="0" aria-label="Полотно сценария">
+          <div id="graph-stage" class="graph-stage">
+            <canvas id="graph-lines" aria-hidden="true"></canvas>
+            <div id="graph-nodes"></div>
+          </div>
+        </div>
+        <div class="graph-inspector">
+          <section aria-labelledby="node-settings-title">
+            <h3 id="node-settings-title">Настройки блока</h3>
+            <div id="node-settings"></div>
+          </section>
+          <section aria-labelledby="node-data-title">
+            <h3 id="node-data-title">Данные выполнения</h3>
+            <div id="node-data"></div>
+          </section>
+        </div>
+        <p id="workflow-note" class="workflow-note" role="status">Выберите источник и запустите сценарий.</p>
+      </section>
+
+      <section class="panel report" aria-labelledby="report-title">
+        <header class="panel-header">
+          <div class="report-heading"><h2 id="report-title">Находки</h2><span id="match-count" hidden></span></div>
+          <div id="report-actions" class="report-actions" hidden>
+            <label class="visually-hidden" for="severity">Критичность</label>
+            <select id="severity">
+              <option value="all">Все уровни</option>
+              <option value="critical">Критический</option>
+              <option value="high">Высокий</option>
+              <option value="medium">Средний</option>
+              <option value="low">Низкий</option>
+            </select>
+            <button type="button" id="download" class="secondary">Скачать JSON</button>
+          </div>
+        </header>
+        <p id="empty" class="empty">Здесь появятся результаты проверки.</p>
+        <ul id="warnings" class="warnings" hidden></ul>
+        <ul id="findings" class="findings" hidden></ul>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
