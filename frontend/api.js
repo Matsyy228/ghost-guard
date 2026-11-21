@@ -57,7 +57,8 @@ async function readWorkflow(response, onNode) {
 }
 
 export async function runWorkflow(body, onNode) {
-  const signal = AbortSignal.timeout(30000);
+  const timeoutSeconds = 120;
+  const signal = AbortSignal.timeout(timeoutSeconds * 1000);
   try {
     const response = await fetch(`${API}/workflow`, { method: "POST", body, signal });
     if (!response.ok) {
@@ -67,7 +68,7 @@ export async function runWorkflow(body, onNode) {
     return await readWorkflow(response, onNode);
   } catch (error) {
     if (signal.aborted) {
-      throw new Error("Истекло время ожидания (30 секунд). Проверьте настройки backend и повторите запуск.", { cause: error });
+      throw new Error(`Истекло время ожидания (${timeoutSeconds} секунд). Проверьте настройки backend и повторите запуск.`, { cause: error });
     }
     if (error instanceof TypeError) {
       throw new Error("Связь с API потеряна. Проверьте подключение и повторите запуск.", { cause: error });

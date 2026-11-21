@@ -233,9 +233,13 @@ async function runScan(event) {
   try {
     if (!await refreshConnection()) throw new Error("Запустите backend из текущего репозитория и проверьте подключение.");
     const failedNodes = new Set();
+    const aiWarnings = [];
     const result = await runWorkflow(body, (event) => {
       editor.showEvent(event);
-      if (event.status === "failed") failedNodes.add(event.id);
+      const aiIssue = event.code?.startsWith("llm-") &&
+        (event.status === "failed" || event.code === "llm-not-configured");
+      if (aiIssue) aiWarnings.push(event.message);
+      else if (event.status === "failed") failedNodes.add(event.id);
       else failedNodes.delete(event.id);
     });
     state.result = result;
@@ -244,9 +248,11 @@ async function runScan(event) {
       fileName,
       receivedAt: new Date(),
       failedBlocks: [...failedNodes].map(editor.name),
+      aiWarnings,
     };
     state.phase = "ready";
     if (failedNodes.size) setRunStatus("Отчёт готов · есть ошибки блоков", "error");
+    else if (aiWarnings.length) setRunStatus("Отчёт готов · предупреждение Qwen", "done");
     else setRunStatus("Завершено", "done");
     const branches = Object.entries(result.branches ?? {}).map(([id, branch]) => `${editor.name(id)}: ${branch === "true" ? "Да" : "Нет"}`);
     const reports = (result.reports ?? []).map(editor.name).join(", ");

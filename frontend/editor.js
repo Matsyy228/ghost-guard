@@ -28,15 +28,16 @@ function element(tag, text = "", className = "") {
 }
 
 function template(width = 960) {
-  const spacing = Math.max(156, Math.floor((width - 32 - WIDTH) / 5));
-  const nodes = ["trigger", "secrets", "sca", "sast", "condition"].map((type, index) => ({
+  const chain = ["trigger", "secrets", "sca", "sast", "llm", "condition"];
+  const spacing = Math.max(156, Math.floor((width - 32 - WIDTH) / chain.length));
+  const nodes = chain.map((type, index) => ({
     id: type, type, x: 16 + index * spacing, y: 115,
   }));
   nodes.at(-1).config = { mode: "severity", value: "high" };
-  const reportX = 16 + 5 * spacing;
+  const reportX = 16 + chain.length * spacing;
   nodes.push({ id: "risk-report", type: "report", label: "Отчёт о рисках", x: reportX, y: 48 },
     { id: "low-report", type: "report", label: "Ниже порога", x: reportX, y: 182 });
-  const edges = nodes.slice(1, 5).map((item, index) => ({ source: nodes[index].id, target: item.id, branch: null }));
+  const edges = chain.slice(1).map((target, index) => ({ source: chain[index], target, branch: null }));
   edges.push({ source: "condition", target: "risk-report", branch: "true" },
     { source: "condition", target: "low-report", branch: "false" });
   return { nodes, edges };
@@ -334,9 +335,9 @@ export function createEditor(ui, onEdit) {
   function remove(id) {
     const incoming = graph.edges.filter((edge) => edge.target === id);
     const outgoing = graph.edges.filter((edge) => edge.source === id);
-    const wasScanner = ["secrets", "sca", "sast"].includes(find(id).type);
+    const canReconnect = ["secrets", "sca", "sast", "llm"].includes(find(id).type);
     graph.edges = graph.edges.filter((edge) => edge.source !== id && edge.target !== id);
-    if (wasScanner && incoming.length === 1 && outgoing.length === 1) {
+    if (canReconnect && incoming.length === 1 && outgoing.length === 1) {
       const bridge = { ...incoming[0], target: outgoing[0].target };
       if (bridge.source !== bridge.target && !graph.edges.some((edge) => edge.source === bridge.source && edge.target === bridge.target && edge.branch === bridge.branch)) {
         graph.edges.push(bridge);

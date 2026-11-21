@@ -99,8 +99,10 @@ export function renderFindings(elements, report, { phase, context, animate }) {
     notes.push(`Отчёт получен с ошибками блоков: ${failedBlocks.join(", ")}.`);
     if (phase === "ready") notes.push("Подробности в сценарии.");
   }
+  const aiWarnings = context?.aiWarnings ?? [];
+  if (aiWarnings.length) notes.push(`Объяснение LLM. ${aiWarnings.join(" ")}`);
   elements["report-notice"].hidden = !hasReport || !notes.length;
-  elements["report-notice"].dataset.status = phase === "stale" || failedBlocks.length ? "warning" : "info";
+  elements["report-notice"].dataset.status = phase === "stale" || failedBlocks.length || aiWarnings.length ? "warning" : "info";
   elements["report-notice"].textContent = notes.join(" ");
 
   const warnings = [];
