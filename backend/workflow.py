@@ -11,7 +11,8 @@ from uuid import uuid4
 
 import scan
 from analyzers.common import submission_report
-from backend.llm import LLMError, explain_findings
+from backend.ai_summary import summarize
+from backend.llm import LLMError, analyze_findings
 from backend.service import InvalidInput
 from backend.webhook import DEMO_PROJECT, WebhookError, parse_url, report_payload, send_report
 
@@ -243,8 +244,10 @@ def execute_workflow(workflow, project, *, workflow_id=None, project_name=DEMO_P
     order, incoming = workflow
     results, outputs, branches = {}, {}, {}
     explanation_outputs = {}
+    ai_outputs = {}
     report_types = set()
     reported_explanations = {}
+    reported_ai = {}
     report_nodes = []
     pending_webhooks = []
     for item in order:
@@ -257,8 +260,10 @@ def execute_workflow(workflow, project, *, workflow_id=None, project_name=DEMO_P
             continue
         types = frozenset().union(*(outputs[edge.source] for edge in linked))
         explanations = {}
+        ai_runs = {}
         for edge in linked:
             explanations.update(explanation_outputs[edge.source])
+            ai_runs.update(ai_outputs[edge.source])
         found = combined_report(types, results)["findings"]
         received = {"sources": [edge.source for edge in linked], "count": len(found), "findings": preview(found)}
         if kind == "webhook":
@@ -284,14 +289,18 @@ def execute_workflow(workflow, project, *, workflow_id=None, project_name=DEMO_P
                 branches[node_id] = branch
             elif kind == "llm":
                 try:
-                    for explanation in explain_findings(found):
+                    analysis = analyze_findings(found)
+                    for explanation in analysis.pop("explanations"):
                         explanations[explanation["finding_id"]] = explanation
+                    ai_runs[node_id] = analysis
                 except LLMError as exc:
                     code, message = exc.code, str(exc)
+                    ai_runs[node_id] = {"summary_code": code}
                     status = "skipped" if code in {"llm-not-configured", "llm-no-findings"} else "failed"
             elif kind == "report":
                 report_types.update(types)
                 reported_explanations.update(explanations)
+                reported_ai.update(ai_runs)
                 report_nodes.append(node_id)
         except (InvalidInput, OSError) as exc:
             message = str(exc) if isinstance(exc, InvalidInput) else "Не удалось прочитать файлы учебного проекта."
@@ -303,11 +312,14 @@ def execute_workflow(workflow, project, *, workflow_id=None, project_name=DEMO_P
 
         outputs[node_id] = types
         explanation_outputs[node_id] = explanations
+        ai_outputs[node_id] = ai_runs
         found = combined_report(types, results)["findings"]
         output = {"count": len(found), "findings": preview(found), "branch": branch,
                   "matched": preview([matched])[0] if matched is not None else None}
         if kind in {"llm", "report"}:
             output["explanations"] = list(explanations.values())
+        if kind == "llm":
+            output["ai"] = ai_runs[node_id]
         yield {
             "event": "node", "id": node_id, "status": status, "message": message, "input": received,
             "output": output, **({"code": code} if code else {}),
@@ -323,6 +335,10 @@ def execute_workflow(workflow, project, *, workflow_id=None, project_name=DEMO_P
     if reported_explanations:
         report["explanations"] = [reported_explanations[item["id"]] for item in report["findings"]
                                   if item["id"] in reported_explanations]
+    if reported_ai:
+        visible = {finding["id"]: reported_explanations[finding["id"]]
+                   for finding in report["findings"] if finding["id"] in reported_explanations}
+        report["ai_summary"] = summarize(report, gate, reported_ai, visible)
     result = {
         "event": "result", "report": report, "reports": report_nodes, "branches": branches,
         "release_gate": gate, "submission": submission_report(report),
