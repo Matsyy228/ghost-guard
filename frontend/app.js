@@ -49,7 +49,7 @@ function node(tag, text, className) {
   return element;
 }
 
-function findingElement(finding) {
+function findingElement(finding, explanation = finding.llm_explanation) {
   const severity = node("span", severityNames[finding.severity] ?? finding.severity, "severity");
   severity.dataset.severity = finding.severity;
   const heading = node("div", "", "finding-heading");
@@ -59,14 +59,36 @@ function findingElement(finding) {
   const item = node("li", "");
   item.append(heading, node("p", location.join(" · "), "finding-location"),
     node("p", finding.recommendation, "finding-recommendation"));
+  const explanationView = explanationElement(explanation);
+  if (explanationView) item.append(explanationView);
   return item;
+}
+
+// The backend may attach an explanation only after validating it against the original finding.
+function explanationElement(explanation) {
+  if (!explanation || typeof explanation !== "object" || Array.isArray(explanation)) return null;
+  const summary = typeof explanation.explanation === "string" ? explanation.explanation.trim()
+    : typeof explanation.summary === "string" ? explanation.summary.trim() : "";
+  const recommendation = typeof explanation.recommendation === "string" ? explanation.recommendation.trim() : "";
+  if (!summary && !recommendation) return null;
+
+  const section = node("section", "", "finding-llm");
+  section.append(node("strong", "Объяснение LLM"));
+  if (summary) section.append(node("p", `Почему: ${summary}`));
+  if (recommendation) section.append(node("p", `Что сделать: ${recommendation}`));
+  return section;
 }
 
 function renderReport() {
   const report = state.report;
   const filter = elements.severity.value;
+  const explanations = new Map(
+    (Array.isArray(report?.explanations) ? report.explanations : [])
+      .filter((item) => item && typeof item.finding_id === "string")
+      .map((item) => [item.finding_id, item]),
+  );
   const findings = (report?.findings ?? []).filter((finding) => filter === "all" || finding.severity === filter);
-  elements.findings.replaceChildren(...findings.map(findingElement));
+  elements.findings.replaceChildren(...findings.map((finding) => findingElement(finding, explanations.get(finding.id))));
   elements.findings.hidden = !findings.length;
   elements.empty.hidden = Boolean(findings.length);
   elements.empty.textContent = report
