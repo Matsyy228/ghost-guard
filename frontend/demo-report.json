@@ -1,0 +1,59 @@
+{
+  "report": {
+    "findings": [
+      {
+        "scanner": "sca",
+        "rule": "affected-dependency",
+        "severity": "medium",
+        "file": "build.gradle.kts",
+        "line": 3,
+        "title": "Версия зависимости входит в уязвимый диапазон",
+        "recommendation": "Обновите зависимость до исправленной версии.",
+        "group": "example.training",
+        "artifact": "demo-library",
+        "version": "1.5.0",
+        "package": "example.training:demo-library",
+        "advisoryId": "CVE-2099-12345",
+        "cve": "CVE-2099-12345",
+        "id": "SCA-F0001"
+      },
+      {
+        "scanner": "secrets",
+        "rule": "password",
+        "severity": "high",
+        "file": "src/main/resources/application-demo.yml",
+        "line": 3,
+        "title": "Пароль задан строковым литералом",
+        "recommendation": "Передавайте секрет из окружения или хранилища, удалите литерал и замените действующий секрет.",
+        "id": "SECRETS-F0001"
+      },
+      {
+        "scanner": "sast",
+        "rule": "spring-stacktrace-exposed",
+        "severity": "medium",
+        "file": "src/main/resources/application-demo.yml",
+        "line": 7,
+        "title": "Трассировка стека всегда включена в ответы об ошибках",
+        "recommendation": "Отключите трассировку в HTTP-ответах и оставьте её во внутренних логах.",
+        "id": "SAST-F0001"
+      }
+    ],
+    "skipped_files": [],
+    "sca": {
+      "status": "ran",
+      "unresolved_versions": []
+    }
+  },
+  "release_gate": {
+    "status": "BLOCK",
+    "counts": {
+      "critical": 0,
+      "high": 1,
+      "medium": 2,
+      "low": 0
+    },
+    "missing_scanners": [],
+    "skipped_files": 0,
+    "unresolved_versions": 0
+  }
+}

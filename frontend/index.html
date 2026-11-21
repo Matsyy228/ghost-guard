@@ -4,54 +4,85 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>GHOST//GUARD</title>
+  <meta name="theme-color" content="#101316">
+  <title>GHOST//GUARD — Проверка проекта</title>
   <link rel="stylesheet" href="./styles.css">
   <script src="./app.js" type="module"></script>
   <script src="./src/effects.jsx" type="module"></script>
 </head>
 <body>
-  <header class="topbar">
-    <div class="topbar-inner">
-      <div class="brand"><span class="brand-mark" aria-hidden="true"></span>GHOST//GUARD</div>
-      <span id="connection" class="connection" role="status">Откройте через локальный сервер</span>
-    </div>
-  </header>
+  <a class="skip-link" href="#overview">К содержимому</a>
+  <aside class="rail">
+    <a class="brand" href="#overview" aria-label="GHOST//GUARD, обзор">
+      <span class="brand-mark" aria-hidden="true"></span><span>GHOST<span class="brand-slash">//</span>GUARD</span>
+    </a>
+    <nav class="rail-nav" aria-label="Рабочая область">
+      <a href="#overview" aria-current="location"><span class="nav-icon icon-overview" aria-hidden="true"></span>Обзор</a>
+      <a href="#workflow"><span class="nav-icon icon-flow" aria-hidden="true"></span>Сценарий</a>
+      <a href="#report"><span class="nav-icon icon-report" aria-hidden="true"></span>Находки</a>
+    </nav>
+    <div class="rail-foot"><span aria-hidden="true">›_</span> Локальная консоль</div>
+  </aside>
+  <div class="shell">
+    <header class="topbar">
+      <span class="breadcrumb">Рабочая область <span aria-hidden="true">/</span> Проверка проекта</span>
+      <span id="connection" class="connection" role="status" data-status="pending">Подключение к API</span>
+    </header>
+    <main class="workspace" id="overview" tabindex="-1">
+      <header class="page-heading">
+        <h1 id="page-title">Проверка проекта</h1>
+        <p>Проверка Kotlin-проекта перед релизом</p>
+      </header>
 
-  <main class="workspace">
-    <div class="page-heading">
-      <h1 id="page-title">Проверка проекта</h1>
-      <p>Соберите проверку Kotlin-проекта перед релизом и увидьте, какие находки повлияли на решение.</p>
-    </div>
-
-    <div class="workspace-grid">
-      <section class="panel inputs" aria-labelledby="inputs-title">
-        <header class="panel-header"><h2 id="inputs-title">Входные данные</h2></header>
-        <form id="scan-form">
-          <div class="mode-switch" role="group" aria-label="Источник проекта">
-            <button type="button" id="demo-mode" aria-pressed="true">Демо</button>
-            <button type="button" id="upload-mode" aria-pressed="false">Мой ZIP</button>
+      <section id="result-summary" class="overview" aria-labelledby="overview-title" data-status="idle">
+        <div class="overview-decision" role="status" aria-atomic="true">
+          <h2 id="overview-title">Готовность к выпуску</h2>
+          <div class="result-lead">
+            <span id="result-status" class="result-status">ОЖИДАНИЕ</span>
+            <h3 id="result-title">Проверка ещё не запускалась</h3>
           </div>
+          <p id="result-detail">Выберите источник ниже и запустите проверку.</p>
+        </div>
+        <div class="overview-next">
+          <h2 id="priority-title">Следующее действие</h2>
+          <p id="priority-text">Начните со встроенного шаблона или загрузите ZIP проекта.</p>
+          <a id="next-action" href="#inputs">Выбрать источник <span aria-hidden="true">↓</span></a>
+        </div>
+      </section>
 
+      <section class="panel inputs" id="inputs" aria-labelledby="inputs-title">
+        <form id="scan-form" class="scan-form">
+          <div class="scan-source">
+            <h2 id="inputs-title">Источник проекта</h2>
+            <div class="mode-switch" role="group" aria-labelledby="inputs-title">
+              <button type="button" id="demo-mode" aria-pressed="true">Демо</button>
+              <button type="button" id="upload-mode" aria-pressed="false">Мой ZIP</button>
+            </div>
+          </div>
           <div id="demo-input" class="demo-info">
             <strong>Учебный проект</strong>
-            <p>Синтетические данные для проверки всех трёх сканеров.</p>
+            <p>Встроенный пример для Secrets, SCA и SAST</p>
           </div>
           <div id="upload-inputs" class="upload-inputs" hidden>
-            <label for="project">Архив проекта <span>ZIP до 8 МиБ</span></label>
-            <input id="project" name="project" type="file" accept=".zip,application/zip">
-            <label for="catalog">Справочник SCA <span>JSON, необязательно</span></label>
-            <input id="catalog" name="catalog" type="file" accept=".json,application/json">
+            <div><label for="project">Архив проекта <span>ZIP до 8 МиБ</span></label>
+            <input id="project" name="project" type="file" accept=".zip,application/zip"></div>
+            <div><label for="catalog">Справочник SCA <span>JSON, необязательно</span></label>
+            <input id="catalog" name="catalog" type="file" accept=".json,application/json"></div>
           </div>
-
-          <p id="launch-help" class="launch-help">Запустите в VS Code задачу <strong>Start app (frontend + backend)</strong> и откройте <a href="http://127.0.0.1:5173/">127.0.0.1:5173</a>.</p>
           <button type="submit" id="run" class="primary" disabled>Запустить проверку</button>
-          <p id="error" class="error" role="alert" hidden></p>
+          <div id="scan-feedback" class="scan-feedback" hidden>
+            <p id="error" class="error" role="alert" tabindex="-1" hidden></p>
+            <div id="offline-actions" class="inline-actions" hidden>
+              <button type="button" id="retry-connection" class="secondary">Проверить подключение</button>
+              <button type="button" id="offline-demo" class="secondary">Открыть резервный демо-отчёт</button>
+            </div>
+          </div>
         </form>
       </section>
 
-      <section class="panel workflow" aria-labelledby="workflow-title">
+      <section class="panel workflow" id="workflow" aria-labelledby="workflow-title">
         <header class="panel-header">
-          <h2 id="workflow-title">Сценарий</h2>
+          <div><h2 id="workflow-title">Сценарий проверки</h2><p>Настройте блоки и проверьте, куда ведёт каждая ветка.</p></div>
           <span id="run-status" class="run-status" role="status">Готов к запуску</span>
         </header>
         <div class="graph-toolbar">
@@ -64,16 +95,17 @@
             <option value="condition">Условие</option>
             <option value="report">Отчёт</option>
           </select>
-          <button type="button" id="add-node" class="secondary">Добавить блок</button>
+          <button type="button" id="add-node" class="secondary"><span class="button-icon" aria-hidden="true">+</span> Добавить блок</button>
           <button type="button" id="reset-graph" class="secondary">Вернуть шаблон</button>
         </div>
         <p id="graph-hint" class="graph-hint" role="status">Для связи нажмите выход блока, затем вход другого блока.</p>
-        <div id="graph-viewport" class="graph-viewport" tabindex="0" aria-label="Полотно сценария">
+        <div id="graph-viewport" class="graph-viewport" tabindex="0" aria-label="Полотно сценария" aria-describedby="graph-scroll-note">
           <div id="graph-stage" class="graph-stage">
             <canvas id="graph-lines" aria-hidden="true"></canvas>
             <div id="graph-nodes"></div>
           </div>
         </div>
+        <p id="graph-scroll-note" class="graph-caption">Полотно можно прокручивать. На выбранном блоке используйте стрелки, чтобы его переместить.</p>
         <div class="graph-inspector">
           <section aria-labelledby="node-settings-title">
             <h3 id="node-settings-title">Настройки блока</h3>
@@ -89,7 +121,7 @@
 
       <section class="panel report" id="report" aria-labelledby="report-title">
         <header class="panel-header">
-          <div class="report-heading"><h2 id="report-title">Находки</h2><span id="match-count" hidden></span></div>
+          <div><h2 id="report-title" tabindex="-1">Результаты проверки</h2><p id="report-caption">Находки сканеров и пояснения модели</p></div>
           <div id="report-actions" class="report-actions" hidden>
             <label class="visually-hidden" for="severity">Критичность</label>
             <select id="severity">
@@ -100,28 +132,20 @@
               <option value="low">Низкий</option>
             </select>
             <button type="button" id="download" class="secondary">Скачать JSON</button>
-            <button type="button" id="rerun" class="primary">Повторить проверку</button>
+            <button type="button" id="rerun" class="secondary">Повторить</button>
           </div>
         </header>
-        <section id="result-summary" class="result-summary" role="status" aria-live="polite" aria-atomic="true" hidden>
-          <div class="result-lead">
-            <span id="result-status" class="result-status">PASS</span>
-            <div>
-              <h3 id="result-title"></h3>
-              <p id="result-detail"></p>
-            </div>
-          </div>
-          <dl class="severity-counts" aria-label="Количество находок по критичности">
-            <div><dt>Критические</dt><dd id="critical-count">0</dd></div>
-            <div><dt>Высокие</dt><dd id="high-count">0</dd></div>
-            <div><dt>Остальные</dt><dd id="other-count">0</dd></div>
-          </dl>
-        </section>
-        <p id="empty" class="empty">Здесь появятся результаты проверки.</p>
+        <p id="report-notice" class="report-notice" hidden></p>
+        <div id="findings-header" class="findings-header" hidden>
+          <span>Критичность</span><span>Находка и источник</span><span id="match-count" role="status"></span>
+        </div>
+        <div id="empty" class="empty"><p id="empty-text">Отчёт появится после запуска сценария.</p>
+          <button type="button" id="clear-filter" class="secondary" hidden>Показать все уровни</button>
+        </div>
         <ul id="warnings" class="warnings" hidden></ul>
         <ul id="findings" class="findings" hidden></ul>
       </section>
-    </div>
-  </main>
+    </main>
+  </div>
 </body>
 </html>

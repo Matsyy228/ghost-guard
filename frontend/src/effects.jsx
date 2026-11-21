@@ -13,10 +13,10 @@ if (!reduceMotion.matches) {
         text={title.textContent}
         tag="span"
         splitType="words"
-        from={{ opacity: 0, y: 10 }}
+        from={{ opacity: 0, y: 4 }}
         to={{ opacity: 1, y: 0 }}
-        duration={0.5}
-        delay={55}
+        duration={0.17}
+        delay={25}
         trigger="load"
         textAlign="left"
       />,

@@ -18,6 +18,7 @@ const branchNames = { true: "Да", false: "Нет" };
 const WIDTH = 132;
 const HEIGHT = 86;
 const LINK_HINT = "Для связи нажмите выход блока, затем вход другого блока.";
+const arrowSteps = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 
 function element(tag, text = "", className = "") {
   const item = document.createElement(tag);
@@ -85,7 +86,7 @@ export function createEditor(ui, onEdit) {
       const reached = events.get(edge.target)?.input?.sources.includes(edge.source);
       const active = reached && (!edge.branch || picked === edge.branch);
       context.lineWidth = active ? 2.8 : 1.6;
-      context.strokeStyle = active ? (edge.branch === "false" ? "#f1c675" : "#69e6c0") : "#486381";
+      context.strokeStyle = active ? "#62d6b0" : "#526873";
       context.setLineDash(picked && edge.branch && picked !== edge.branch ? [4, 4] : []);
       context.beginPath();
       context.moveTo(beginX, beginY);
@@ -111,7 +112,7 @@ export function createEditor(ui, onEdit) {
     }
     const contentWidth = Math.max(...graph.nodes.map((item) => item.x + WIDTH + 16));
     const contentHeight = Math.max(...graph.nodes.map((item) => item.y + HEIGHT + 20));
-    const targetHeight = Math.min(720, Math.max(300, Math.round(window.innerHeight * 0.5)));
+    const targetHeight = Math.min(390, Math.max(300, Math.round(window.innerHeight * 0.37)));
     stage.style.width = `${Math.max(availableWidth, contentWidth)}px`;
     stage.style.height = `${Math.max(targetHeight, contentHeight)}px`;
     if (autoLayout) {
@@ -186,6 +187,7 @@ export function createEditor(ui, onEdit) {
     selected = pending.source;
     pending = null;
     edit({ message: `Связь добавлена: ${name(selected)} → ${name(target)}.` });
+    cards.get(target).querySelector(".graph-handle").focus();
   }
 
   function port(item, side, branch = null) {
@@ -216,6 +218,22 @@ export function createEditor(ui, onEdit) {
     handle.type = "button";
     handle.append(element("strong", name(item.id)), element("span", "", "graph-badge"));
     handle.addEventListener("click", () => choose(item.id));
+    function move(x, y) {
+      autoLayout = false;
+      item.x = Math.round(Math.max(12, Math.min(stage.offsetWidth - WIDTH - 12, x)));
+      item.y = Math.round(Math.max(12, Math.min(stage.offsetHeight - HEIGHT - 12, y)));
+      position(item, card);
+      draw();
+    }
+    handle.addEventListener("keydown", (event) => {
+      const step = arrowSteps[event.key];
+      if (!step || busy || event.ctrlKey || event.altKey || event.metaKey) return;
+      event.preventDefault();
+      if (selected !== item.id) choose(item.id);
+      const distance = event.shiftKey ? 32 : 8;
+      move(item.x + step[0] * distance, item.y + step[1] * distance);
+      handle.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
     let start;
     handle.addEventListener("pointerdown", (event) => {
       if (busy || event.button !== 0) return;
@@ -224,11 +242,7 @@ export function createEditor(ui, onEdit) {
     });
     handle.addEventListener("pointermove", (event) => {
       if (!start || start.pointer !== event.pointerId) return;
-      autoLayout = false;
-      item.x = Math.round(Math.max(12, Math.min(stage.offsetWidth - WIDTH - 12, start.left + event.clientX - start.x)));
-      item.y = Math.round(Math.max(12, Math.min(stage.offsetHeight - HEIGHT - 12, start.top + event.clientY - start.y)));
-      position(item, card);
-      draw();
+      move(start.left + event.clientX - start.x, start.top + event.clientY - start.y);
     });
     handle.addEventListener("lostpointercapture", () => { start = null; });
     card.append(handle);
@@ -315,6 +329,7 @@ export function createEditor(ui, onEdit) {
     selected = graph.nodes.find((item) => item.type === "condition")?.id ?? graph.nodes[0].id;
     pending = null;
     edit();
+    cards.get(selected).querySelector(".graph-handle").focus();
   }
 
   function renderSettings() {
@@ -337,6 +352,7 @@ export function createEditor(ui, onEdit) {
         graph.edges = graph.edges.filter((link) => link !== edge);
         pending = null;
         edit();
+        cards.get(selected).querySelector(".graph-handle").focus();
       });
       row.append(unlink);
       list.append(row);
@@ -372,9 +388,9 @@ export function createEditor(ui, onEdit) {
     if (!summary && !recommendation) return null;
 
     const section = element("section", "", "finding-llm");
-    section.append(element("strong", "Объяснение LLM"));
+    section.append(element("strong", "Интерпретация модели"));
     if (summary) section.append(element("p", `Почему: ${summary}`));
-    if (recommendation) section.append(element("p", `Что сделать: ${recommendation}`));
+    if (recommendation) section.append(element("p", `Совет модели. ${recommendation}`));
     return section;
   }
 
@@ -440,7 +456,7 @@ export function createEditor(ui, onEdit) {
     selected = item.id;
     pending = null;
     edit();
-    cards.get(item.id).scrollIntoView({ block: "nearest", inline: "nearest" });
+    cards.get(item.id).querySelector(".graph-handle").focus();
   });
   ui["reset-graph"].addEventListener("click", () => {
     graph = template(ui["graph-viewport"].clientWidth || 960);
@@ -457,6 +473,11 @@ export function createEditor(ui, onEdit) {
 
   return {
     name,
+    clearResults() {
+      events.clear();
+      paintCards();
+      renderData();
+    },
     payload: () => ({ nodes: graph.nodes.map(({ id, type, config }) => ({ id, type, config })), edges: graph.edges }),
     setBusy(value) {
       busy = value;

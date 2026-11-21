@@ -1,264 +1,269 @@
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
+import { checkAPI, runWorkflow } from "./api.js";
 import { createEditor } from "./editor.js";
+import { renderFindings, scannerNames, sortedFindings } from "./report.js";
+import demoReport from "./demo-report.json";
 
-const API = "http://127.0.0.1:8000/api";
-const elements = Object.fromEntries(
-  [...document.querySelectorAll("[id]")].map((element) => [element.id, element]),
-);
-const severityNames = {
-  critical: "Критический", high: "Высокий", medium: "Средний", low: "Низкий",
-};
-const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
-const scannerNames = { secrets: "Secrets", sca: "SCA", sast: "SAST" };
-const state = { mode: "demo", active: false, report: null, releaseGate: null };
-const editor = createEditor(elements, () => {
-  state.report = null;
-  renderReport();
-  elements.error.hidden = true;
-  elements["run-status"].textContent = "Готов к запуску";
-  elements["workflow-note"].textContent = "Запустите сценарий с обновлёнными настройками.";
+const ui = Object.fromEntries([...document.querySelectorAll("[id]")].map((element) => [element.id, element]));
+const state = { phase: "idle", mode: "demo", connection: "pending", result: null };
+let connectionCheck;
+
+const editor = createEditor(ui, () => {
+  resetResult("Запустите сценарий с обновлёнными настройками.");
 });
 
+function clearError() {
+  ui.error.hidden = true;
+  ui.error.textContent = "";
+}
+
+function resetResult(note) {
+  state.phase = "idle";
+  state.result = null;
+  clearError();
+  ui["workflow-note"].textContent = note;
+  setRunStatus("Готов к запуску");
+  render();
+}
+
 function setMode(mode) {
+  if (state.mode === mode) return;
   state.mode = mode;
   const upload = mode === "upload";
-  elements["demo-mode"].setAttribute("aria-pressed", String(!upload));
-  elements["upload-mode"].setAttribute("aria-pressed", String(upload));
-  elements["demo-input"].hidden = upload;
-  elements["upload-inputs"].hidden = !upload;
-  elements.project.required = upload;
-  elements.error.hidden = true;
+  ui["demo-mode"].setAttribute("aria-pressed", String(!upload));
+  ui["upload-mode"].setAttribute("aria-pressed", String(upload));
+  ui["demo-input"].hidden = upload;
+  ui["upload-inputs"].hidden = !upload;
+  ui.project.required = upload;
+  editor.clearResults();
+  resetResult(upload ? "Загрузите ZIP проекта и запустите сценарий." : "Запустите сценарий на встроенном учебном проекте.");
 }
 
-function setConnection(online, message) {
-  elements.connection.dataset.status = online ? "online" : "offline";
-  elements.connection.textContent = message;
+function refreshConnection() {
+  connectionCheck ??= checkAPI().then(({ status, label }) => {
+    const changed = state.connection !== status;
+    state.connection = status;
+    ui.connection.dataset.status = status;
+    if (ui.connection.textContent !== label) ui.connection.textContent = label;
+    renderFeedback();
+    if (changed) renderOverview();
+    return status === "online";
+  }).finally(() => { connectionCheck = null; });
+  return connectionCheck;
 }
 
-async function checkConnection() {
-  try {
-    const response = await fetch(`${API}/health`, { signal: AbortSignal.timeout(2000) });
-    if (!response.ok) throw new Error("Health check failed");
-    const { status, service, api_version, build_id } = await response.json();
-    const compatible = status === "ok" && service === "ghost-guard" && api_version === 2 && /^[a-f0-9]{16}$/.test(build_id);
-    setConnection(compatible, compatible ? "Backend подключён" : "Перезапустите backend из текущего репозитория");
-    return compatible;
-  } catch {
-    setConnection(false, "Backend недоступен на порту 8000");
-    return false;
+function renderFeedback() {
+  const offline = state.connection === "offline" && state.phase !== "running";
+  ui["offline-actions"].hidden = !offline;
+  ui["scan-feedback"].hidden = !offline && ui.error.hidden;
+}
+
+function linkAction(href, label) {
+  const arrow = document.createElement("span");
+  arrow.setAttribute("aria-hidden", "true");
+  arrow.textContent = " ↓";
+  ui["next-action"].href = href;
+  ui["next-action"].replaceChildren(document.createTextNode(label), arrow);
+}
+
+function renderOverview() {
+  const { phase, connection, result } = state;
+  const gate = result?.release_gate;
+  const decision = {
+    BLOCK: ["block", "Выпуск заблокирован"],
+    WARNING: ["warning", "Требуется проверка"],
+    PASS: ["pass", "Проверка пройдена"],
+  }[gate?.status];
+
+  let status = "idle";
+  let badge = "ОЖИДАНИЕ";
+  let title = "Проверка ещё не запускалась";
+  let detail = "Выберите источник ниже и запустите проверку.";
+  let prompt = "Следующее действие";
+  let next = state.mode === "upload" ? "Загрузите ZIP проекта." : "Запустите встроенный сценарий на учебном проекте.";
+  let href = "#inputs";
+  let action = "К запуску проверки";
+
+  if (phase === "running") {
+    status = "busy";
+    badge = "В РАБОТЕ";
+    title = "Выполняется проверка";
+    detail = "Отчёт формируется по мере выполнения сценария.";
+    next = "Статусы отдельных блоков обновляются на схеме.";
+    href = "#workflow";
+    action = "Смотреть ход проверки";
+  } else if (phase === "error" || phase === "idle" && connection === "offline") {
+    badge = "НЕТ ОТЧЁТА";
+    title = phase === "error" ? "Проверка не завершилась" : "API недоступен для проверки";
+    detail = "Актуальная оценка выпуска отсутствует.";
+    next = connection === "offline"
+      ? "Проверьте подключение или откройте резервный учебный отчёт."
+      : "Проверьте сообщение об ошибке и повторите запуск.";
+    action = "К ошибке и повторному запуску";
+  } else if (result) {
+    [status, title] = decision ?? ["idle", "Сервер не выдал оценку выпуска"];
+    badge = phase === "snapshot" ? "ПРИМЕР" : (decision ? gate.status : "ОТЧЁТ");
+    const counts = gate?.counts;
+    const missing = (gate?.missing_scanners ?? []).map((scanner) => scannerNames[scanner] ?? scanner);
+    const reasons = [];
+    if (counts?.critical) reasons.push(`критических — ${counts.critical}`);
+    if (counts?.high) reasons.push(`высоких — ${counts.high}`);
+    if (counts?.medium || counts?.low) reasons.push(`средних и низких — ${counts.medium + counts.low}`);
+    if (missing.length) reasons.push(`не выполнялись ${missing.join(", ")}`);
+    if (gate?.skipped_files) reasons.push(`пропущено файлов — ${gate.skipped_files}`);
+    if (gate?.unresolved_versions) reasons.push(`не определено версий — ${gate.unresolved_versions}`);
+    detail = reasons.length ? reasons.join(" · ") : (decision
+      ? "Все сканеры отработали. Находок нет."
+      : "Отчёт доступен для просмотра.");
+    if (phase === "snapshot") {
+      status = "idle";
+      title = decision ? `Учебный пример · ${gate.status}` : "Учебный пример";
+    }
+    const first = sortedFindings(result.report.findings)[0];
+    prompt = first ? "Приоритетная находка в отчёте" : "Следующее действие";
+    next = first?.title || (missing.length ? "Проверьте, почему часть сканеров не выполнилась." : "Откройте отчёт или выгрузите JSON.");
+    href = "#report";
+    action = "Открыть результаты";
   }
+
+  ui["result-summary"].dataset.status = status;
+  ui["result-status"].textContent = badge;
+  ui["result-title"].textContent = title;
+  ui["result-detail"].textContent = detail;
+  ui["priority-title"].textContent = prompt;
+  ui["priority-text"].textContent = next;
+  linkAction(href, action);
 }
 
-function node(tag, text, className) {
-  const element = document.createElement(tag);
-  element.textContent = text;
-  if (className) element.className = className;
-  return element;
+function render(animate = false) {
+  renderOverview();
+  renderFeedback();
+  renderFindings(ui, state.result?.report, { phase: state.phase, mode: state.mode, animate });
 }
 
-function findingElement(finding, explanation = finding.llm_explanation) {
-  const level = finding.severity ?? "unknown";
-  const severity = node("span", severityNames[level] ?? level, "severity");
-  severity.dataset.severity = level;
-  const heading = node("div", "", "finding-heading");
-  heading.append(severity, node("strong", finding.title || "Описание не предоставлено сканером."));
-  const fileLine = finding.file
-    ? `${finding.file}${finding.line == null ? "" : `:${finding.line}`}`
-    : finding.line == null ? "" : `Строка ${finding.line}`;
-  const location = [scannerNames[finding.scanner] ?? finding.scanner, fileLine]
-    .filter((value) => typeof value === "string" && value.length);
-  if (finding.advisoryId || finding.cve) location.push(finding.advisoryId || finding.cve, `${finding.package}@${finding.version}`);
-  const item = node("li", "");
-  item.append(heading);
-  if (location.length) item.append(node("p", location.join(" · "), "finding-location"));
-  const recommendation = node("p", "", "finding-recommendation");
-  recommendation.append(node("strong", "Что исправить: "), document.createTextNode(
-    finding.recommendation || "Рекомендация отсутствует в отчёте.",
-  ));
-  item.append(recommendation);
-  const explanationView = explanationElement(explanation);
-  if (explanationView) item.append(explanationView);
-  return item;
-}
-
-// The backend may attach an explanation only after validating it against the original finding.
-function explanationElement(explanation) {
-  if (!explanation || typeof explanation !== "object" || Array.isArray(explanation)) return null;
-  const summary = typeof explanation.explanation === "string" ? explanation.explanation.trim()
-    : typeof explanation.summary === "string" ? explanation.summary.trim() : "";
-  const recommendation = typeof explanation.recommendation === "string" ? explanation.recommendation.trim() : "";
-  if (!summary && !recommendation) return null;
-
-  const section = node("section", "", "finding-llm");
-  section.append(node("strong", "Объяснение LLM"));
-  if (summary) section.append(node("p", `Почему: ${summary}`));
-  if (recommendation) section.append(node("p", `Что сделать: ${recommendation}`));
-  return section;
-}
-
-function renderReport() {
-  const report = state.report;
-  const filter = elements.severity.value;
-  const allFindings = Array.isArray(report?.findings) ? report.findings : [];
-  const explanations = new Map(
-    (Array.isArray(report?.explanations) ? report.explanations : [])
-      .filter((item) => item && typeof item.finding_id === "string")
-      .map((item) => [item.finding_id, item]),
-  );
-  const findings = allFindings
-    .filter((finding) => filter === "all" || finding.severity === filter)
-    .sort((left, right) => (severityOrder[left.severity] ?? 99) - (severityOrder[right.severity] ?? 99));
-  elements.findings.replaceChildren(...findings.map((finding) => findingElement(finding, explanations.get(finding.id))));
-  elements.findings.hidden = !findings.length;
-  elements.empty.hidden = Boolean(findings.length);
-  elements.empty.textContent = report
-    ? (allFindings.length ? "Нет находок выбранной критичности." : "Сканеры не вернули находок.")
-    : "Здесь появятся результаты проверки.";
-  elements["report-actions"].hidden = !report;
-  elements["match-count"].hidden = !report;
-  elements["match-count"].textContent = report ? `${findings.length} из ${allFindings.length}` : "";
-
-  const warnings = [];
-  if (report?.sca?.status === "catalog-missing") warnings.push("SCA пропущен. Добавьте JSON-справочник, чтобы проверить зависимости.");
-  if (report?.sca?.unresolved_versions?.length) warnings.push(`Зависимости с неопределённой версией: ${report.sca.unresolved_versions.length}.`);
-  if (report?.skipped_files?.length) warnings.push(`Пропущенные файлы: ${report.skipped_files.length}.`);
-  elements.warnings.replaceChildren(...warnings.map((warning) => node("li", warning)));
-  elements.warnings.hidden = !warnings.length;
-
-  const gate = report ? state.releaseGate : null;
-  elements["result-summary"].hidden = !gate;
-  if (gate) {
-    const { critical, high, medium, low } = gate.counts;
-    const other = medium + low;
-    const status = gate.status.toLowerCase();
-    const statusTitles = {
-      block: "Есть высокие или критические находки",
-      warning: "Проверка завершена с замечаниями",
-      pass: "Сканеры не вернули находок",
-    };
-    const statusDetails = {
-      block: "Исправьте эти уязвимости и запустите проверку ещё раз.",
-      warning: gate.missing_scanners.length
-        ? `Не выполнены все проверки: ${gate.missing_scanners.map((scanner) => scannerNames[scanner]).join(", ")}.`
-        : "Проверьте находки и предупреждения перед выпуском.",
-      pass: "Отчёт готов; можно скачать JSON или изменить сценарий.",
-    };
-    elements["result-summary"].dataset.status = status;
-    elements["result-status"].textContent = gate.status;
-    elements["result-title"].textContent = statusTitles[status];
-    elements["result-detail"].textContent = statusDetails[status];
-    elements["critical-count"].textContent = critical;
-    elements["high-count"].textContent = high;
-    elements["other-count"].textContent = other;
-  }
+function setRunStatus(text, status = "idle") {
+  ui["run-status"].textContent = text;
+  ui["run-status"].dataset.status = status;
 }
 
 function setBusy(active) {
-  state.active = active;
-  for (const control of [elements.run, elements.rerun, elements["demo-mode"], elements["upload-mode"], elements.project, elements.catalog]) {
+  for (const control of [ui.run, ui.rerun, ui.project, ui.catalog,
+    ui["demo-mode"], ui["upload-mode"], ui["offline-demo"], ui["retry-connection"]]) {
     control.disabled = active;
   }
+  ui.run.textContent = active ? "Выполняется…" : "Запустить проверку";
   editor.setBusy(active);
-  elements.run.textContent = active ? "Выполняется…" : "Запустить проверку";
 }
 
-async function readWorkflow(response) {
-  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-  let pending = "";
-  let result;
-
-  function applyEvent(line) {
-    const event = JSON.parse(line);
-    if (event.event === "node") editor.showEvent(event);
-    if (event.event === "error") throw new Error(event.error);
-    if (event.event === "result") result = event;
-  }
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      const lines = (pending + value).split("\n");
-      pending = lines.pop();
-      for (const line of lines) if (line) applyEvent(line);
-    }
-    if (pending.trim()) applyEvent(pending);
-  } finally {
-    await reader.cancel().catch(() => {});
-    reader.releaseLock();
-  }
-  if (!result) throw new Error("Выполнение прервалось до получения отчёта.");
-  return result;
+function showReport() {
+  setCurrentSection("#report");
+  ui["report-title"].focus({ preventScroll: true });
+  ui.report.scrollIntoView({ block: "start" });
 }
 
 async function runScan(event) {
   event.preventDefault();
-  if (state.active) return;
-
+  if (state.phase === "running") return;
   const demo = state.mode === "demo";
-  const body = demo ? new FormData() : new FormData(elements["scan-form"]);
-  if (!elements.catalog.files.length) body.delete("catalog");
+  const body = demo ? new FormData() : new FormData(ui["scan-form"]);
+  if (!ui.catalog.files.length) body.delete("catalog");
   body.append("workflow", new Blob([JSON.stringify(editor.payload())], { type: "application/json" }), "workflow.json");
+
+  state.phase = "running";
+  state.result = null;
+  ui.severity.value = "all";
   setBusy(true);
-  state.report = null;
-  renderReport();
-  elements.error.hidden = true;
-  elements["run-status"].textContent = "Выполняется";
-  elements["workflow-note"].textContent = "Backend проверяет граф и выполняет связанные блоки.";
+  setRunStatus("Выполняется", "busy");
+  ui["workflow-note"].textContent = "API проверяет сценарий и выполняет связанные блоки.";
+  clearError();
+  render();
 
   try {
-    if (!await checkConnection()) throw new Error(elements.connection.textContent);
-    const response = await fetch(`${API}/workflow`, {
-      method: "POST", body, signal: AbortSignal.timeout(30000),
-    });
-    if (!response.ok) throw new Error((await response.json()).error);
-    const result = await readWorkflow(response);
-    state.report = result.report;
-    state.releaseGate = result.release_gate;
-    elements.severity.value = "all";
-    elements["run-status"].textContent = "Завершено";
-    const decisions = Object.entries(result.branches).map(([id, branch]) => `${editor.name(id)}: ${branch === "true" ? "Да" : "Нет"}`);
-    const messages = result.reports.length ? [`Выполнено: ${result.reports.map(editor.name).join(", ")}.`] : ["Активная ветка завершилась без блока отчёта."];
-    if (decisions.length) messages.unshift(`${decisions.join(" · ")}.`);
-    if (demo && result.report) messages.push("Данные демо синтетические.");
-    elements["workflow-note"].textContent = messages.join(" ");
-    renderReport();
-    if (!result.report) elements.empty.textContent = "Добавьте блок отчёта в активную ветку.";
-    elements.report.scrollIntoView({ block: "start" });
+    if (!await refreshConnection()) throw new Error("Запустите backend из текущего репозитория и проверьте подключение.");
+    const result = await runWorkflow(body, editor.showEvent);
+    state.result = result;
+    state.phase = "ready";
+    setRunStatus("Завершено", "done");
+    const branches = Object.entries(result.branches ?? {}).map(([id, branch]) => `${editor.name(id)}: ${branch === "true" ? "Да" : "Нет"}`);
+    const reports = (result.reports ?? []).map(editor.name).join(", ");
+    ui["workflow-note"].textContent = [...branches, reports && `Сформирован отчёт «${reports}»`].filter(Boolean).join(" · ") || "Сценарий завершён.";
+    render(true);
+    showReport();
   } catch (error) {
     editor.finishFailed();
-    elements["run-status"].textContent = "Ошибка";
-    elements["workflow-note"].textContent = "Отчёт не сформирован.";
-    const networkFailure = error instanceof TypeError || error.name === "TimeoutError";
-    elements.error.textContent = networkFailure
-      ? "Backend не ответил. Проверьте, что он запущен на порту 8000."
-      : (error.message || "Проверка завершилась ошибкой.");
-    elements.error.hidden = false;
-    elements.error.scrollIntoView({ block: "center" });
-    if (networkFailure) void checkConnection();
+    state.phase = "error";
+    setRunStatus("Ошибка", "error");
+    ui["workflow-note"].textContent = "Отчёт не сформирован.";
+    ui.error.textContent = error.message || "Проверка завершилась ошибкой.";
+    ui.error.hidden = false;
+    render();
+    ui["inputs"].scrollIntoView({ block: "start" });
+    ui.error.focus({ preventScroll: true });
+    void refreshConnection();
   } finally {
     setBusy(false);
   }
 }
 
+function openOfflineReport() {
+  if (state.phase === "running") return;
+  editor.clearResults();
+  state.phase = "snapshot";
+  state.result = demoReport;
+  ui.severity.value = "all";
+  clearError();
+  setRunStatus("Нет активного запуска");
+  ui["workflow-note"].textContent = "Открыт резервный отчёт. Сценарий не запускался.";
+  render(true);
+  showReport();
+}
+
 function downloadReport() {
-  if (!state.report) return;
-  const url = URL.createObjectURL(new Blob([JSON.stringify(state.report, null, 2)], { type: "application/json" }));
+  if (!state.result?.report) return;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(state.result.report, null, 2)], { type: "application/json" }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = "security-report.json";
+  link.download = state.phase === "snapshot" ? "ghost-guard-demo-report.json" : "security-report.json";
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-elements["demo-mode"].addEventListener("click", () => setMode("demo"));
-elements["upload-mode"].addEventListener("click", () => setMode("upload"));
-elements["scan-form"].addEventListener("submit", runScan);
-elements.severity.addEventListener("change", renderReport);
-elements.download.addEventListener("click", downloadReport);
-elements.rerun.addEventListener("click", () => elements["scan-form"].requestSubmit());
-elements["launch-help"].hidden = true;
-elements.run.disabled = false;
-elements.connection.dataset.status = "pending";
-elements.connection.textContent = "Проверка подключения";
-void checkConnection();
-window.addEventListener("focus", checkConnection);
+function setCurrentSection(section = location.hash) {
+  const target = section === "#workflow" || section === "#report" ? section : "#overview";
+  for (const link of document.querySelectorAll(".rail-nav a")) {
+    if (link.hash === target) link.setAttribute("aria-current", "location");
+    else link.removeAttribute("aria-current");
+  }
+}
+
+ui["demo-mode"].addEventListener("click", () => setMode("demo"));
+ui["upload-mode"].addEventListener("click", () => setMode("upload"));
+for (const input of [ui.project, ui.catalog]) {
+  input.addEventListener("change", () => {
+    editor.clearResults();
+    resetResult("Входные данные изменились. Запустите сценарий ещё раз.");
+  });
+}
+ui["scan-form"].addEventListener("submit", runScan);
+ui.severity.addEventListener("change", () => render());
+ui["clear-filter"].addEventListener("click", () => {
+  ui.severity.value = "all";
+  render();
+  ui.severity.focus();
+});
+ui.download.addEventListener("click", downloadReport);
+ui.rerun.addEventListener("click", () => ui["scan-form"].requestSubmit());
+ui["offline-demo"].addEventListener("click", openOfflineReport);
+ui["retry-connection"].addEventListener("click", async () => {
+  if (await refreshConnection()) {
+    clearError();
+    renderFeedback();
+    ui.run.focus();
+  }
+});
+window.addEventListener("hashchange", () => setCurrentSection());
+window.addEventListener("focus", refreshConnection);
+setCurrentSection();
+ui.run.disabled = false;
+void refreshConnection();
