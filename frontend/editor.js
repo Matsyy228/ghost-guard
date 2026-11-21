@@ -1,6 +1,6 @@
 const typeNames = {
   trigger: "Ручной запуск", secrets: "Secrets", sca: "SCA", sast: "SAST",
-  condition: "Условие", report: "Отчёт",
+  llm: "Объяснение LLM", condition: "Условие", report: "Отчёт",
 };
 const statusNames = {
   idle: "Ожидает", running: "Выполняется", done: "Выполнено", skipped: "Пропущено", failed: "Ошибка",
@@ -291,6 +291,9 @@ export function createEditor(ui, onEdit) {
     const item = find(selected);
     settings.replaceChildren(element("p", name(item.id)));
     if (item.type === "condition") settings.append(conditionSettings(item));
+    if (item.type === "llm") {
+      settings.append(element("p", "Объясняет входные находки. Адрес провайдера, модель и ключ задаются в окружении backend."));
+    }
     const list = element("ul", "", "graph-links");
     const outgoing = graph.edges.filter((edge) => edge.source === item.id);
     for (const edge of outgoing) {
@@ -321,7 +324,41 @@ export function createEditor(ui, onEdit) {
   function dataList(data) {
     const list = element("ul", "", "graph-data-list");
     for (const finding of data.findings) {
-      list.append(element("li", `${finding.scanner} · ${finding.file}:${finding.line} · ${finding.severity}`));
+      const details = [finding.id, finding.scanner, finding.rule, `${finding.file}:${finding.line}`, finding.severity]
+        .filter((value) => typeof value === "string" && value.length);
+      const item = element("li", details.join(" · "));
+      const explanation = explanationElement(finding.llm_explanation);
+      if (explanation) item.append(explanation);
+      list.append(item);
+    }
+    return list;
+  }
+
+  function explanationElement(explanation) {
+    if (!explanation || typeof explanation !== "object" || Array.isArray(explanation)) return null;
+    const summary = typeof explanation.explanation === "string" ? explanation.explanation.trim()
+      : typeof explanation.summary === "string" ? explanation.summary.trim() : "";
+    const recommendation = typeof explanation.recommendation === "string" ? explanation.recommendation.trim() : "";
+    if (!summary && !recommendation) return null;
+
+    const section = element("section", "", "finding-llm");
+    section.append(element("strong", "Объяснение LLM"));
+    if (summary) section.append(element("p", `Почему: ${summary}`));
+    if (recommendation) section.append(element("p", `Что сделать: ${recommendation}`));
+    return section;
+  }
+
+  function explanationList(explanations) {
+    const list = element("ul", "", "graph-data-list");
+    for (const explanation of explanations) {
+      const location = explanation.file && Number.isInteger(explanation.line)
+        ? `${explanation.file}:${explanation.line}` : "";
+      const details = [explanation.finding_id, location, explanation.advisoryId]
+        .filter((value) => typeof value === "string" && value.length);
+      const item = element("li", details.join(" · "));
+      const rendered = explanationElement(explanation);
+      if (rendered) item.append(rendered);
+      list.append(item);
     }
     return list;
   }
@@ -349,7 +386,12 @@ export function createEditor(ui, onEdit) {
         dataView.append(element("p", `Ветка «${branchNames[current.output.branch]}»${match ? ` · ${match.file}:${match.line} · ${match.severity}` : ""}`));
       }
       if (current.output.findings.length) dataView.append(dataList(current.output));
+      if (Array.isArray(current.output.explanations) && current.output.explanations.length) {
+        dataView.append(element("p", `Объяснений: ${current.output.explanations.length}`),
+          explanationList(current.output.explanations));
+      }
     }
+    if (current.code) dataView.append(element("p", `Код ошибки: ${current.code}`));
     if (current.message) dataView.append(element("p", current.message));
   }
 

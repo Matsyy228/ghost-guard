@@ -122,6 +122,9 @@ h2 { font-size: 1.06rem; font-weight: 650; }
 .severity[data-severity="medium"] { color: var(--warning); background: #3d3323; }
 .finding-location { color: var(--muted); overflow-wrap: anywhere; font-size: .875rem; font-family: Consolas, monospace; }
 .finding-recommendation { margin-top: 7px; color: #d2deea; line-height: 1.45; }
+.finding-llm { display: grid; gap: 5px; margin-top: 9px; padding: 8px 10px; border-left: 2px solid var(--accent); border-radius: 0 7px 7px 0; background: #10251f; }
+.finding-llm strong { color: var(--accent); font-size: .875rem; font-weight: 650; }
+.finding-llm p { color: #d2deea; font-size: .875rem; line-height: 1.45; overflow-wrap: anywhere; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 
 @media (max-width: 800px) {
