@@ -99,6 +99,7 @@
             <option value="llm">Объяснение LLM</option>
             <option value="condition">Условие</option>
             <option value="report">Отчёт</option>
+            <option value="webhook">Webhook</option>
           </select>
           <button type="button" id="add-node" class="secondary"><span class="button-icon" aria-hidden="true">+</span> Добавить блок</button>
           <button type="button" id="reset-graph" class="secondary">Вернуть шаблон</button>
@@ -146,6 +147,10 @@
           </div>
         </header>
         <p id="report-notice" class="report-notice" hidden></p>
+        <section id="webhook-deliveries" class="webhook-deliveries" aria-labelledby="webhook-deliveries-title" hidden>
+          <h3 id="webhook-deliveries-title">Доставка отчёта</h3>
+          <ul id="webhook-delivery-list"></ul>
+        </section>
         <div id="findings-header" class="findings-header" hidden>
           <span>Критичность</span><span>Находка и источник</span><span id="match-count" role="status"></span>
         </div>

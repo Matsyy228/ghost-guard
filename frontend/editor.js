@@ -1,6 +1,8 @@
+import { deliveryDetails, deliveryLabels } from "./webhook.js";
+
 const typeNames = {
   trigger: "Ручной запуск", secrets: "Secrets", sca: "SCA", sast: "SAST",
-  llm: "Объяснение LLM", condition: "Условие", report: "Отчёт",
+  llm: "Объяснение LLM", condition: "Условие", report: "Отчёт", webhook: "Webhook",
 };
 const statusNames = {
   idle: "Ожидает", running: "Выполняется", done: "Выполнено", skipped: "Пропущено", failed: "Ошибка",
@@ -137,7 +139,8 @@ export function createEditor(ui, onEdit) {
       card.dataset.status = status;
       card.dataset.selected = String(id === selected);
       card.querySelector(".graph-handle").setAttribute("aria-pressed", String(id === selected));
-      card.querySelector(".graph-badge").textContent = statusNames[status];
+      card.querySelector(".graph-badge").textContent =
+        deliveryLabels[events.get(id)?.delivery_status] ?? statusNames[status];
       for (const port of card.querySelectorAll(".graph-port")) {
         port.disabled = busy;
         if (port.classList.contains("out")) {
@@ -186,6 +189,10 @@ export function createEditor(ui, onEdit) {
     }
     if (pending.source === target) {
       setHint("Выберите вход другого блока.");
+      return;
+    }
+    if ((find(pending.source).type === "report") !== (find(target).type === "webhook")) {
+      setHint("Webhook подключается только к выходу блока «Отчёт».");
       return;
     }
     if (graph.edges.length >= 48) {
@@ -261,7 +268,7 @@ export function createEditor(ui, onEdit) {
     card.append(handle);
     if (item.type !== "trigger") card.append(port(item, "in"));
     if (item.type === "condition") card.append(port(item, "out", "true"), port(item, "out", "false"));
-    else if (item.type !== "report") card.append(port(item, "out"));
+    else if (item.type !== "webhook") card.append(port(item, "out"));
     position(item, card);
     return card;
   }
@@ -357,6 +364,23 @@ export function createEditor(ui, onEdit) {
     if (item.type === "llm") {
       settings.append(element("p", "Объясняет входные находки. Адрес провайдера, модель и ключ задаются в окружении backend."));
     }
+    if (item.type === "webhook") {
+      const form = element("div", "", "graph-config webhook-config");
+      const label = element("label", "URL получателя");
+      const input = element("input");
+      input.type = "url";
+      input.maxLength = 512;
+      input.placeholder = "http://127.0.0.1:8765/webhook";
+      input.value = item.config.url;
+      input.disabled = busy;
+      input.addEventListener("input", () => {
+        item.config.url = input.value.trim();
+        edit({ rebuild: false });
+      });
+      label.append(input);
+      form.append(label);
+      settings.append(form, element("p", "Подключите выход отчёта. Получатель должен быть разрешён на сервере."));
+    }
     const list = element("ul", "", "graph-links");
     const outgoing = graph.edges.filter((edge) => edge.source === item.id);
     for (const edge of outgoing) {
@@ -433,7 +457,8 @@ export function createEditor(ui, onEdit) {
       dataView.replaceChildren(element("p", "Данные блока появятся после запуска."));
       return;
     }
-    dataView.replaceChildren(element("p", `${name(selected)} · ${statusNames[current.status]}`));
+    const delivery = deliveryLabels[current.delivery_status];
+    dataView.replaceChildren(element("p", `${name(selected)} · ${delivery ?? statusNames[current.status]}`));
     if (current.input) {
       const sources = current.input.sources.map(name).join(", ") || "Ручной запуск";
       dataView.append(element("p", `Вход из ${sources} · находок ${current.input.count}`));
@@ -443,7 +468,10 @@ export function createEditor(ui, onEdit) {
         dataView.append(details);
       }
     }
-    if (current.output) {
+    if (delivery) {
+      const details = deliveryDetails(current);
+      if (details) dataView.append(element("p", details));
+    } else if (current.output) {
       dataView.append(element("p", `На выходе находок: ${current.output.count}`));
       if (current.output.branch) {
         const match = current.output.matched;
@@ -470,6 +498,7 @@ export function createEditor(ui, onEdit) {
     const spacing = Math.max(156, Math.floor((stage.offsetWidth - 32 - WIDTH) / 5));
     const item = { id: `block-${count}`, type, label: `${typeNames[type]} ${count}`, x: 16 + (index % 6) * spacing, y: 326 + Math.floor(index / 6) * 108 };
     if (type === "condition") item.config = { mode: "severity", value: "high" };
+    if (type === "webhook") item.config = { url: "" };
     graph.nodes.push(item);
     selected = item.id;
     pending = null;
@@ -512,13 +541,16 @@ export function createEditor(ui, onEdit) {
       renderData();
     },
     showEvent(event) {
-      events.set(event.id, event);
+      const input = event.input ?? events.get(event.id)?.input;
+      events.set(event.id, { ...event, input });
       paintCards();
       if (selected === event.id) renderData();
     },
     finishFailed() {
       for (const [id, event] of events) {
-        if (event.status === "running") events.set(id, { ...event, status: "failed", message: "Выполнение прервано." });
+        if (event.status === "running") {
+          events.set(id, { ...event, status: "failed", delivery_status: undefined, message: "Выполнение прервано." });
+        }
       }
       paintCards();
       renderData();

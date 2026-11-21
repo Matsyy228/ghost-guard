@@ -1,3 +1,5 @@
+import { deliveryDetails, deliveryLabels } from "./webhook.js";
+
 const severityNames = {
   critical: "Критический", high: "Высокий", medium: "Средний", low: "Низкий",
 };
@@ -104,6 +106,18 @@ export function renderFindings(elements, report, { phase, context, animate }) {
   elements["report-notice"].hidden = !hasReport || !notes.length;
   elements["report-notice"].dataset.status = phase === "stale" || failedBlocks.length || aiWarnings.length ? "warning" : "info";
   elements["report-notice"].textContent = notes.join(" ");
+
+  const deliveries = context?.deliveries ?? [];
+  elements["webhook-deliveries"].hidden = !hasReport || !deliveries.length;
+  elements["webhook-delivery-list"].replaceChildren(...deliveries.map((event) => {
+    const status = deliveryLabels[event.delivery_status];
+    const details = deliveryDetails(event);
+    const row = node("li");
+    row.dataset.delivery = event.delivery_status;
+    row.append(node("strong", [event.name, status, details].filter(Boolean).join(" · ")));
+    if (event.message) row.append(node("p", event.message));
+    return row;
+  }));
 
   const warnings = [];
   if (report?.sca?.status === "catalog-missing") warnings.push("SCA пропущен. Для проверки зависимостей добавьте справочник JSON.");

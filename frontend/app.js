@@ -234,8 +234,13 @@ async function runScan(event) {
     if (!await refreshConnection()) throw new Error("Запустите backend из текущего репозитория и проверьте подключение.");
     const failedNodes = new Set();
     const aiWarnings = [];
+    const deliveries = new Map();
     const result = await runWorkflow(body, (event) => {
       editor.showEvent(event);
+      if (event.delivery_status) {
+        deliveries.set(event.id, { name: editor.name(event.id), ...event });
+        return;
+      }
       const aiIssue = event.code?.startsWith("llm-") &&
         (event.status === "failed" || event.code === "llm-not-configured");
       if (aiIssue) aiWarnings.push(event.message);
@@ -249,6 +254,7 @@ async function runScan(event) {
       receivedAt: new Date(),
       failedBlocks: [...failedNodes].map(editor.name),
       aiWarnings,
+      deliveries: [...deliveries.values()],
     };
     state.phase = "ready";
     if (failedNodes.size) setRunStatus("Отчёт готов · есть ошибки блоков", "error");

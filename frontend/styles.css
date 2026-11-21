@@ -167,6 +167,7 @@ button:disabled, select:disabled, input:disabled { cursor: default; opacity: .58
 .graph-config { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; margin: 7px 0; }
 .graph-config label { display: grid; gap: 3px; color: var(--muted); font-size: .78rem; min-width: 0; }
 .graph-config input, .graph-config select { width: 100%; min-width: 0; }
+.webhook-config { grid-template-columns: minmax(0, 1fr); }
 .graph-links { display: grid; gap: 2px; margin: 5px 0; padding: 0; list-style: none; }
 .graph-links li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .graph-links button, .remove-node { min-height: 29px; flex: none; padding: 2px 1px; border: 0; color: var(--text); background: none; font-size: .8rem; text-decoration: underline; text-underline-offset: .16em; }
@@ -177,6 +178,10 @@ button:disabled, select:disabled, input:disabled { cursor: default; opacity: .58
 .report-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .report-notice { padding: 8px 16px; border-bottom: 1px solid var(--line-soft); background: #202c2b; color: var(--text); font-size: .83rem; }
 .report-notice[data-status="warning"] { background: #342a1e; color: var(--warning); }
+.webhook-deliveries { padding: 10px 16px; border-bottom: 1px solid var(--line-soft); font-size: .83rem; overflow-wrap: anywhere; }
+.webhook-deliveries h3 { font-size: .88rem; margin-bottom: 4px; }
+.webhook-deliveries ul { display: grid; gap: 6px; padding: 0; list-style: none; }
+.webhook-deliveries [data-delivery="FAILED"] { color: var(--warning); }
 .empty { display: grid; gap: 9px; min-height: 104px; justify-items: center; align-content: center; padding: 14px; color: var(--muted); text-align: center; }
 .findings, .warnings { margin: 0; padding: 0; list-style: none; }
 .warnings { display: grid; gap: 4px; padding: 9px 16px; border-bottom: 1px solid var(--line-soft); color: var(--warning); font-size: .82rem; }
