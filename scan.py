@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+from collections import Counter
 from pathlib import Path
 
 from analyzers.common import Kotlin, finding, submission_report
@@ -132,6 +133,27 @@ def scan(root, catalog=None, *, scanners=SCANNERS):
                        "catalog-missing" if catalog is None else "ran"),
             "unresolved_versions": unresolved_versions,
         },
+    }
+
+
+def release_gate(report, scanners=SCANNERS):
+    counts = Counter(finding["severity"] for finding in report["findings"])
+    missing = SCANNERS.difference(scanners)
+    if report["sca"]["status"] != "ran":
+        missing |= {"sca"}
+    incomplete = bool(missing or report["skipped_files"] or report["sca"]["unresolved_versions"])
+    if counts["critical"] or counts["high"]:
+        status = "BLOCK"
+    elif counts["medium"] or counts["low"] or incomplete:
+        status = "WARNING"
+    else:
+        status = "PASS"
+    return {
+        "status": status,
+        "counts": {level: counts[level] for level in ("critical", "high", "medium", "low")},
+        "missing_scanners": sorted(missing),
+        "skipped_files": len(report["skipped_files"]),
+        "unresolved_versions": len(report["sca"]["unresolved_versions"]),
     }
 
 

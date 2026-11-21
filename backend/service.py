@@ -78,6 +78,14 @@ def demo_project():
     return DEMO / "project", scan.load_catalog(DEMO / "catalog.json")
 
 
+def runtime_directory():
+    runtime = ROOT / ".runtime"
+    runtime.mkdir(exist_ok=True)
+    if runtime.resolve() != runtime:
+        raise InvalidInput("Каталог .runtime должен находиться в папке приложения.")
+    return runtime
+
+
 @contextmanager
 def upload_project(archive, catalog_data):
     if not archive or len(archive) > MAX_ARCHIVE:
@@ -85,11 +93,7 @@ def upload_project(archive, catalog_data):
     if catalog_data is not None and len(catalog_data) > MAX_CATALOG:
         raise InvalidInput("JSON-справочник должен быть меньше 512 КиБ.")
 
-    runtime = ROOT / ".runtime"
-    runtime.mkdir(exist_ok=True)
-    if runtime.resolve() != runtime:
-        raise InvalidInput("Каталог .runtime должен находиться в папке приложения.")
-    with TemporaryDirectory(prefix="scan-", dir=runtime) as workspace:
+    with TemporaryDirectory(prefix="scan-", dir=runtime_directory()) as workspace:
         work = Path(workspace)
         project = work / "project"
         project.mkdir()
@@ -103,6 +107,15 @@ def upload_project(archive, catalog_data):
             except (ValueError, RecursionError) as exc:
                 raise InvalidInput("Неверный формат справочника SCA. Пример есть в README.") from exc
         yield project, catalog
+
+
+@contextmanager
+def workflow_project(archive, catalog):
+    if archive is None:
+        yield demo_project()
+    else:
+        with upload_project(archive, catalog) as project:
+            yield project
 
 
 def scan_demo():
