@@ -95,3 +95,78 @@ SQLite сохранит `last_run.status = "failed"` до передачи эт�
 - **Индикатор соединения.** Для уже открытой вкладки или запуска UI вне задач VS Code Влад может дополнить проверку `/health`: требовать `service === "ghost-guard"`, `api_version === 2` и идентификатор сборки. Если поставка UI закрепляет конкретную сборку, сравнивать с ожидаемым `build_id`. При несовпадении показывать ошибку версии до отправки графа.
 - **Редактор и результаты.** Типы нод, форма графа и успешного отчёта совместимы. Используйте существующий блок «Отчёт» на обоих выходах или подключите к нему оба ребра. Показывайте `skipped` у неактивных нод и `error` при отсутствии отчёта. Предыдущий отчёт при ошибке нового запуска следует убрать с экрана.
 - **Последний запуск.** Отображайте сохранённые `last_run.status` и терминальное событие. При первом открытии базы обновлённым сервером старые ложные успехи с явным `report: null` получают `failed` и код ошибки. Граф, время и события выполненных нод сохраняются. Новый запуск заменяет запись последнего запуска для этого сценария.
+
+## Webhook Notification
+
+Добавьте в редактор тип `webhook` с одним входом и полем URL. Добавьте выход блоку «Отчёт» для связи с webhook. В графе можно подключить несколько отчётов к одному webhook. Блок достигнут, если выполнен хотя бы один связанный отчёт. Сводка создаётся после объединения всех выполненных отчётов графа, включая отчёты параллельных веток.
+
+```json
+{
+  "nodes": [
+    {"id":"start","type":"trigger"},
+    {"id":"secrets","type":"secrets"},
+    {"id":"report","type":"report"},
+    {"id":"notify","type":"webhook","config":{"url":"http://127.0.0.1:8765/webhook"}}
+  ],
+  "edges": [
+    {"source":"start","target":"secrets"},
+    {"source":"secrets","target":"report"},
+    {"source":"report","target":"notify"}
+  ]
+}
+```
+
+Сохраняйте граф в `workflow` по `POST /api/workflows` или `PUT /api/workflows/{id}`. Запускайте через `POST /api/workflows/{id}/run` или одноразовый `POST /api/workflow`. Состояния приходят в NDJSON и сохраняются в `GET /api/workflows/{id}/last-run`. Некорректный URL или связь возвращают HTTP 400 при проверке графа. Статус доставки отображайте отдельно от решения Release Gate и статуса всего графа.
+
+| `delivery_status` | `status` ноды | Смысл |
+|---|---|---|
+| `PENDING` | `running` | Вход активен, ждём итоговый агрегат |
+| `SENDING` | `running` | Началась отправка |
+| `SENT` | `done` | Получен HTTP 2xx |
+| `FAILED` | `failed` | Доставка не подтверждена. Покажите `message`, при наличии `output.http_status` и `output.attempts` |
+| `NOT_CONFIGURED` | `skipped` | `config.url` отсутствует или пуст |
+| `SKIPPED` | `skipped` | Вход не активен или выполнение прервалось до итогового отчёта |
+
+```json
+{"event":"node","id":"notify","status":"failed","delivery_status":"FAILED","code":"webhook-http-error","message":"Получатель webhook вернул HTTP 500.","output":{"attempts":3,"http_status":500}}
+```
+
+При сбое доставки терминальный `result` содержит отчёт, а сохранённый запуск получает `completed-with-errors`. Отказ allowlist имеет код `webhook-url-not-allowed`, закрытый адрес DNS — `webhook-address-not-public`, таймаут — `webhook-timeout`, TLS — `webhook-tls-error`, проблемы соединения — `webhook-connection-error`. Если отчёт не достигнут, сохраняется существующий `workflow-report-unreached`. В `result` при достигнутом webhook добавляются `workflow_id`, `run_id` и `report_id`. Для одноразового запуска приходит временный `workflow_id`.
+
+### Что получит HTTP-получатель
+
+```json
+{
+  "event_type":"security_scan_completed",
+  "workflow_id":"12d9dc895fe542b8b40e16b655a95803",
+  "run_id":"de1eee68daaa4997a1bacccb93fb0266",
+  "project_name":"ghost-guard-demo",
+  "timestamp":"2026-11-21T09:30:00+00:00",
+  "total_findings":1,
+  "severity_counts":{"critical":0,"high":1,"medium":0,"low":0},
+  "release_gate_status":"BLOCK",
+  "findings_summary":[{"scanner":"secrets","severity":"high","count":1}],
+  "report_id":"81a0dae772a349a784ecce5ac6155881"
+}
+```
+
+Для загруженного учебного проекта `project_name` равно `training-zip`. Имя файла и пользовательское имя сценария остаются вне сводки. Сводка содержит только числа по сканерам и уровням. `release_gate_status` совпадает с итоговым решением для всего запуска. Повторные попытки используют тот же `report_id`, чтобы получатель мог отфильтровать повторную доставку. Повторный запуск графа получает новый ID.
+
+### Локальная демонстрация
+
+В отдельном терминале из корня репозитория запустите получатель, который печатает принятый JSON и подтверждает его HTTP 200.
+
+```powershell
+.\.venv\Scripts\python.exe -B -u -m backend.webhook_receiver
+```
+
+Во втором терминале задайте точный разрешённый URL и запустите backend. Запущенный ранее backend нужно перезапустить, чтобы он получил эту настройку.
+
+```powershell
+$env:GHOST_WEBHOOK_LOCAL_URL = 'http://127.0.0.1:8765/webhook'
+.\.venv\Scripts\python.exe -B -u -m backend.server
+```
+
+Для полного прогона укажите в окружении backend `GHOST_LLM_BASE_URL` и `GHOST_LLM_MODEL` для уже работающей локальной Qwen, например `http://127.0.0.1:18080/v1` и имя модели, с которым запущен сервер. Передайте разрешённые учебный ZIP и каталог. Соберите граф `trigger → secrets → sca → sast → llm → report → webhook`. После запуска сверьте `run_id`, `report_id`, число находок и решение Gate с JSON в консоли получателя.
+
+При пустом окружении отправка не разрешена. Для внешнего получателя выберите HTTPS и задайте точные URL через пробел в `GHOST_WEBHOOK_ALLOWED_URLS`. Внешний домен разрешается в публичный адрес, TLS проверяет сертификат для исходного имени. URL должен быть без учётных данных, параметров запроса, фрагментов и секретов в пути. HTTP redirects отключены. Используются таймауты соединения и чтения, максимум три попытки при временных сетевых сбоях и HTTP 408, 429, 500, 502, 503 или 504.

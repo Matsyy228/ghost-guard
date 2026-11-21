@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from analyzers.common import submission_report
 from backend.service import InvalidInput, upload_project, workflow_project
+from backend.webhook import DEMO_PROJECT, ZIP_PROJECT
 from backend.workflow import REPORT_UNREACHED, REPORT_UNREACHED_MESSAGE, compile_workflow, execute_workflow
 
 
@@ -218,7 +219,10 @@ class WorkflowStore:
         try:
             workflow = compile_workflow(claimed["graph"].encode("utf-8"))
             with workflow_project(claimed["archive"], claimed["catalog"]) as project:
-                for event in execute_workflow(workflow, project):
+                for event in execute_workflow(
+                    workflow, project, workflow_id=claimed["id"],
+                    project_name=ZIP_PROJECT if claimed["archive"] is not None else DEMO_PROJECT,
+                ):
                     if event["event"] in {"result", "error"}:
                         terminal = event
                         break

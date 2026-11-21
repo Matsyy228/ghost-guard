@@ -14,6 +14,7 @@ from backend.service import (
     InvalidInput, MAX_ARCHIVE, MAX_CATALOG, runtime_directory, scan_demo, scan_upload, workflow_project,
 )
 from backend.version import HOST, PORT, IDENTITY
+from backend.webhook import DEMO_PROJECT, ZIP_PROJECT
 from backend.workflow import MAX_GRAPH_BYTES, compile_workflow, execute_workflow
 from backend.workflows import WorkflowNotFound, WorkflowStore, run_scheduled
 
@@ -185,7 +186,10 @@ class Handler(BaseHTTPRequestHandler):
         if "project" not in data and "catalog" in data:
             raise InvalidInput("Для загружаемого справочника нужен ZIP проекта.")
         with workflow_project(data.get("project"), data.get("catalog")) as project:
-            self.stream_workflow(execute_workflow(workflow, project))
+            self.stream_workflow(execute_workflow(
+                workflow, project,
+                project_name=ZIP_PROJECT if "project" in data else DEMO_PROJECT,
+            ))
 
     def save_workflow(self, workflow_id=None):
         content_type = self.headers.get("Content-Type", "").partition(";")[0].strip().lower()
