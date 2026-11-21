@@ -27,7 +27,7 @@ function fact(label, value) {
   return row;
 }
 
-function findingElement(finding, explanation, open) {
+function findingElement(finding, explanation, open, priority) {
   const level = finding.severity;
   const severity = node("span", severityNames[level] ?? "Без оценки", "severity");
   severity.dataset.severity = level;
@@ -62,6 +62,7 @@ function findingElement(finding, explanation, open) {
   }
 
   const details = node("details");
+  if (priority) details.id = "priority-finding";
   details.open = open;
   details.append(summary, body);
   const row = node("li");
@@ -77,7 +78,7 @@ export function renderFindings(elements, report, { phase, context, animate }) {
   const snapshot = phase === "snapshot";
   elements.findings.classList.toggle("is-fresh", animate);
   elements.findings.replaceChildren(...findings.map((finding, index) =>
-    findingElement(finding, matchingExplanation(report, finding), index === 0)));
+    findingElement(finding, matchingExplanation(report, finding), index === 0, finding === all[0])));
   elements.findings.hidden = !findings.length;
   elements.empty.hidden = Boolean(findings.length);
   elements["empty-text"].textContent = hasReport

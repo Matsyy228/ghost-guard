@@ -66,9 +66,15 @@ function renderFeedback() {
 }
 
 function linkAction(href, label) {
+  ui["next-action"].hidden = !label;
+  if (!label) {
+    ui["next-action"].removeAttribute("href");
+    ui["next-action"].replaceChildren();
+    return;
+  }
   const arrow = document.createElement("span");
   arrow.setAttribute("aria-hidden", "true");
-  arrow.textContent = " ↓";
+  arrow.textContent = "↓";
   ui["next-action"].href = href;
   ui["next-action"].replaceChildren(document.createTextNode(label), arrow);
 }
@@ -121,11 +127,11 @@ function renderOverview() {
   let status = "idle";
   let badge = "ОЖИДАНИЕ";
   let title = "Проверка ещё не запускалась";
-  let detail = "Выберите источник ниже и запустите проверку.";
+  let detail = "Решение о выпуске появится в отчёте.";
   let prompt = "Следующее действие";
   let next = state.mode === "upload" ? "Загрузите ZIP проекта." : "Запустите встроенный сценарий на учебном проекте.";
   let href = "#inputs";
-  let action = "К запуску проверки";
+  let action;
 
   if (phase === "running") {
     status = "busy";
@@ -141,6 +147,7 @@ function renderOverview() {
     title = "Показан предыдущий результат";
     detail = "Сценарий или входные данные изменились после этого запуска.";
     next = connection === "offline" ? "Восстановите API и запустите проверку заново." : "Запустите проверку с текущими настройками.";
+    action = "К запуску проверки";
   } else if (phase === "error" || phase === "idle" && connection === "offline") {
     badge = "НЕТ ОТЧЁТА";
     title = phase === "error" ? "Проверка не завершилась" : "API недоступен для проверки";
@@ -148,7 +155,7 @@ function renderOverview() {
     next = connection === "offline"
       ? "Проверьте подключение или откройте резервный учебный отчёт."
       : "Проверьте сообщение об ошибке и повторите запуск.";
-    action = "К ошибке и повторному запуску";
+    action = connection === "offline" ? "К подключению API" : "К ошибке и повторному запуску";
   } else if (result) {
     [status, title] = decision ?? ["idle", "Сервер не выдал оценку выпуска"];
     badge = phase === "snapshot" ? "ПРИМЕР" : (decision ? gate.status : "ОТЧЁТ");
@@ -170,8 +177,8 @@ function renderOverview() {
     const first = sortedFindings(result.report.findings)[0];
     prompt = first ? "Приоритетная находка в отчёте" : "Следующее действие";
     next = first?.title || (missing.length ? "Проверьте, почему часть сканеров не выполнилась." : "Откройте отчёт или выгрузите JSON.");
-    href = "#report";
-    action = "Открыть результаты";
+    href = first ? "#priority-finding" : "#report";
+    action = first ? "Открыть находку" : "Открыть результаты";
   }
 
   ui["result-summary"].dataset.status = status;
@@ -202,12 +209,6 @@ function setBusy(active) {
   }
   ui.run.textContent = active ? "Выполняется…" : "Запустить проверку";
   editor.setBusy(active);
-}
-
-function showReport() {
-  setCurrentSection("#report");
-  ui["report-title"].focus({ preventScroll: true });
-  ui.report.scrollIntoView({ block: "start" });
 }
 
 async function runScan(event) {
@@ -251,7 +252,7 @@ async function runScan(event) {
     const reports = (result.reports ?? []).map(editor.name).join(", ");
     ui["workflow-note"].textContent = [...branches, reports && `Сформирован отчёт «${reports}»`].filter(Boolean).join(" · ") || "Сценарий завершён.";
     render(true);
-    showReport();
+    navigate("#report");
   } catch (error) {
     editor.finishFailed();
     state.phase = "error";
@@ -260,8 +261,7 @@ async function runScan(event) {
     ui.error.textContent = error.message || "Проверка завершилась ошибкой.";
     ui.error.hidden = false;
     render();
-    ui["inputs"].scrollIntoView({ block: "start" });
-    ui.error.focus({ preventScroll: true });
+    navigate("#inputs");
     void refreshConnection();
   } finally {
     setBusy(false);
@@ -279,7 +279,7 @@ function openOfflineReport() {
   setRunStatus("Нет активного запуска");
   ui["workflow-note"].textContent = "Открыт резервный отчёт. Сценарий не запускался.";
   render(true);
-  showReport();
+  navigate("#report");
 }
 
 function downloadReport() {
@@ -295,12 +295,53 @@ function downloadReport() {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function setCurrentSection(section = location.hash) {
-  const target = section === "#workflow" || section === "#report" ? section : "#overview";
-  for (const link of document.querySelectorAll(".rail-nav a")) {
-    if (link.hash === target) link.setAttribute("aria-current", "location");
-    else link.removeAttribute("aria-current");
+const sectionLinks = [...document.querySelectorAll(".rail-nav a")];
+const destinations = {
+  "#overview": ["#overview", "page-title"],
+  "#inputs": ["#overview", "inputs-title"],
+  "#workflow": ["#workflow", "workflow-title"],
+  "#node-settings-title": ["#workflow", "node-settings-title"],
+  "#report": ["#report", "report-title"],
+  "#priority-finding": ["#report", "report-title"],
+};
+
+function setCurrentSection(section) {
+  for (const link of sectionLinks) {
+    if (link.hash === section) {
+      link.setAttribute("aria-current", "location");
+      ui["current-section"].textContent = link.textContent.trim();
+    } else {
+      link.removeAttribute("aria-current");
+    }
   }
+}
+
+function navigate(hash, { push = true } = {}) {
+  hash = hash || "#overview";
+  if (!Object.hasOwn(destinations, hash)) return;
+
+  let focusTarget;
+  if (hash === "#priority-finding") {
+    if (state.result?.report.findings.length && !document.getElementById("priority-finding")) {
+      ui.severity.value = "all";
+      render();
+    }
+    const finding = document.getElementById("priority-finding");
+    if (finding) {
+      finding.open = true;
+      focusTarget = finding.querySelector("summary");
+    } else {
+      hash = "#report";
+      if (!push) history.replaceState(null, "", hash);
+    }
+  }
+
+  if (push && location.hash !== hash) history.pushState(null, "", hash);
+  const [section, heading] = destinations[hash];
+  setCurrentSection(section);
+  focusTarget ??= hash === "#inputs" && !ui.error.hidden ? ui.error : ui[heading];
+  focusTarget.focus({ preventScroll: true });
+  focusTarget.scrollIntoView({ block: "start" });
 }
 
 ui["demo-mode"].addEventListener("click", () => setMode("demo"));
@@ -328,8 +369,15 @@ ui["retry-connection"].addEventListener("click", async () => {
     ui.run.focus();
   }
 });
-window.addEventListener("hashchange", () => setCurrentSection());
+document.addEventListener("click", (event) => {
+  const link = event.target.closest('a[href^="#"]');
+  if (!link || !Object.hasOwn(destinations, link.hash) || event.defaultPrevented ||
+      event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+  event.preventDefault();
+  navigate(link.hash);
+});
+window.addEventListener("hashchange", () => navigate(location.hash, { push: false }));
 window.addEventListener("focus", refreshConnection);
-setCurrentSection();
+if (location.hash) navigate(location.hash, { push: false });
 ui.run.disabled = false;
 void refreshConnection();

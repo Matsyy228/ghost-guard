@@ -46,6 +46,8 @@ export function createEditor(ui, onEdit) {
   const stage = ui["graph-stage"];
   const canvas = ui["graph-lines"];
   const nodeLayer = ui["graph-nodes"];
+  const viewport = ui["graph-viewport"];
+  const nodePicker = ui["jump-node"];
   const settings = ui["node-settings"];
   const dataView = ui["node-data"];
   const hint = ui["graph-hint"];
@@ -101,7 +103,6 @@ export function createEditor(ui, onEdit) {
   }
 
   function resizeStage() {
-    const viewport = ui["graph-viewport"];
     const availableWidth = viewport.clientWidth;
     if (autoLayout) {
       const positions = new Map(template(availableWidth || 960).nodes.map(({ id, x, y }) => [id, { x, y }]));
@@ -129,6 +130,7 @@ export function createEditor(ui, onEdit) {
   }
 
   function paintCards() {
+    nodePicker.value = selected;
     for (const [id, card] of cards) {
       const status = events.get(id)?.status ?? "idle";
       card.dataset.status = status;
@@ -164,6 +166,16 @@ export function createEditor(ui, onEdit) {
     renderSettings();
     renderData();
   }
+
+  nodePicker.addEventListener("change", () => {
+    const card = cards.get(nodePicker.value);
+    if (!card) return;
+    choose(nodePicker.value);
+    viewport.scrollTo({
+      left: card.offsetLeft - (viewport.clientWidth - card.offsetWidth) / 2,
+      top: card.offsetTop - (viewport.clientHeight - card.offsetHeight) / 2,
+    });
+  });
 
   function connect(target) {
     if (!pending) {
@@ -258,6 +270,11 @@ export function createEditor(ui, onEdit) {
     cards.clear();
     for (const item of graph.nodes) cards.set(item.id, makeCard(item));
     nodeLayer.replaceChildren(...cards.values());
+    nodePicker.replaceChildren(...graph.nodes.map((item) => {
+      const option = element("option", name(item.id));
+      option.value = item.id;
+      return option;
+    }));
     paintCards();
     renderSettings();
     renderData();
