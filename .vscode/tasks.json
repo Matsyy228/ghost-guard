@@ -8,10 +8,28 @@
       "args": ["-B", "-u", "-m", "backend.server"],
       "options": { "cwd": "${workspaceFolder}" },
       "presentation": { "reveal": "always", "panel": "dedicated", "group": "workflow" },
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "ghost-backend",
+        "pattern": { "regexp": "^(.+):(\\d+): (.+)$", "file": 1, "line": 2, "message": 3 },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^Starting GHOST//GUARD",
+          "endsPattern": "^GHOST//GUARD backend ready at http://127\\.0\\.0\\.1:8000 build=[a-f0-9]{16}$"
+        }
+      }
+    },
+    {
+      "label": "Verify backend build",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": ["-B", "-m", "backend.version", "--check"],
+      "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     },
     {
       "label": "Start frontend",
+      "dependsOn": "Verify backend build",
       "type": "process",
       "command": "${workspaceFolder}/.venv/Scripts/python.exe",
       "args": ["-B", "-u", "-m", "http.server", "5173", "--bind", "127.0.0.1", "--directory", "frontend"],
@@ -36,7 +54,8 @@
     },
     {
       "label": "Start app (frontend + backend)",
-      "dependsOn": ["Start frontend", "Start backend"],
+      "dependsOrder": "sequence",
+      "dependsOn": ["Start backend", "Start frontend"],
       "problemMatcher": []
     }
   ]

@@ -11,6 +11,8 @@ from backend.workflow import compile_workflow, execute_workflow
 
 FINDING = {
     "id": "SCA-F0001", "scanner": "sca", "rule": "affected-dependency", "severity": "high",
+    "title": "Версия зависимости входит в уязвимый диапазон",
+    "recommendation": "Обновите зависимость до исправленной версии.",
     "file": "internal-name/build.gradle.kts", "line": 7, "advisoryId": "CVE-2099-12345",
     "source": "private-fixture-text",
 }
@@ -42,7 +44,8 @@ class LLMTests(unittest.TestCase):
         metadata = json.loads(payload["messages"][1]["content"])
         self.assertEqual(request.full_url, "http://127.0.0.1:11434/v1/chat/completions")
         self.assertEqual(metadata, [{"finding_id": "SCA-F0001", "category": "sca", "rule": "affected-dependency",
-                                     "severity": "high", "advisory_id": "CVE-2099-12345"}])
+                                     "severity": "high", "advisory_id": "CVE-2099-12345",
+                                     "title": FINDING["title"], "fix": FINDING["recommendation"]}])
         self.assertNotIn("internal-name", str(payload))
         self.assertNotIn("private-fixture-text", str(payload))
         self.assertEqual(result, [{**EXPLANATION, "file": FINDING["file"], "line": 7, "advisoryId": "CVE-2099-12345"}])
@@ -55,6 +58,8 @@ class LLMTests(unittest.TestCase):
             [{**EXPLANATION, "explanation": "Влияет CVE-2099-001."}],
             [{**EXPLANATION, "explanation": "Относится к SCA-F9999."}],
             [{**EXPLANATION, "recommendation": "Измените fake.kt в строке 9."}],
+            [{**EXPLANATION, "recommendation": "Update the dependency."}],
+            [{**EXPLANATION, "recommendation": "Для этого 更新依赖项。"}],
             [{**EXPLANATION, "line": 999}],
             [],
         ]

@@ -10,7 +10,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 MAX_FINDINGS = 20
 MAX_RESPONSE_BYTES = 64 * 1024
-REQUEST_TIMEOUT = 15
+REQUEST_TIMEOUT = 22
 FINDING_ID = re.compile(r"(?:SECRETS|SAST|SCA)-F[0-9]{4,}")
 RULE = re.compile(r"[a-z][a-z0-9-]{0,63}")
 MODEL = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:/@-]{0,127}")
@@ -22,13 +22,15 @@ LOCATION_OR_LINK = re.compile(
     r"\b(?:lines?|строк[а-яё]*)\s*[:#№]?\s*\d+",
     re.I,
 )
+CYRILLIC = re.compile(r"[А-Яа-яЁё]")
+HAN = re.compile(r"[\u3400-\u9fff]")
 SEVERITY = {name: index for index, name in enumerate(("low", "medium", "high", "critical"))}
 SYSTEM_PROMPT = (
-    'Объясняй только переданные находки статического анализатора учебного Kotlin/Spring проекта. '
-    'Верни один JSON-объект {"explanations":[{"finding_id":"…","explanation":"…","recommendation":"…"}]}. '
-    'Верни ровно одну запись на каждый входной ID. Пиши по-русски, по одному короткому предложению на поле. '
-    'Описывай риск и безопасное исправление. Не добавляй новые находки, код, ссылки, файлы, строки или advisory ID. '
-    'Уровень серьёзности уже определён анализатором.'
+    'Напиши разработчику короткое объяснение для каждого входного finding_id. Ответ строго на русском языке.\n'
+    'Формат JSON: {"explanations":[{"finding_id":"ID из входа","explanation":"Кратко опишите риск.",'
+    '"recommendation":"Предложите конкретное исправление."}]}\n'
+    'Опирайся на title и fix. До 10 слов в каждом предложении. Скопируй только входные идентификаторы. '
+    'Не указывай критичность, ссылки, файлы, строки, версии или advisory ID.'
 )
 
 
@@ -79,7 +81,8 @@ def call_provider(endpoint, model, key, requested):
     messages = []
     for item in requested.values():
         metadata = {"finding_id": item["id"], "category": item["scanner"],
-                    "rule": item["rule"], "severity": item["severity"]}
+                    "rule": item["rule"], "severity": item["severity"],
+                    "title": item["title"], "fix": item["recommendation"][:220]}
         advisory = item.get("advisoryId", "")
         if ADVISORY.fullmatch(advisory):
             metadata["advisory_id"] = advisory
@@ -87,7 +90,7 @@ def call_provider(endpoint, model, key, requested):
     payload = {
         "model": model,
         "messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                     {"role": "user", "content": json.dumps(messages)}],
+                     {"role": "user", "content": json.dumps(messages, ensure_ascii=False, separators=(",", ":"))}],
         "response_format": {"type": "json_object"},
         "stream": False,
         "max_tokens": 4000,
@@ -132,6 +135,8 @@ def validate_response(response, requested):
             value = item[name]
             if not isinstance(value, str) or not value.strip() or len(value) > 400 or not value.strip().isprintable():
                 raise LLMError("llm-invalid-response", "В ответе LLM должно быть короткое текстовое объяснение и исправление.")
+            if not CYRILLIC.search(value) or HAN.search(value):
+                raise LLMError("llm-invalid-response", "Ожидается объяснение и исправление на русском языке.")
             if any(ref.upper() not in advisories for ref in TEXT_ADVISORY.findall(value)):
                 raise LLMError("llm-invalid-response", "LLM указала advisory, отсутствующий у находки.")
             if any(ref.upper() != finding_id for ref in TEXT_FINDING_ID.findall(value)):

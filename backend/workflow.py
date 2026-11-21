@@ -9,11 +9,14 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 
 import scan
+from analyzers.common import submission_report
 from backend.llm import LLMError, explain_findings
 from backend.service import InvalidInput
 
 
 MAX_GRAPH_BYTES = 16 * 1024
+REPORT_UNREACHED = "workflow-report-unreached"
+REPORT_UNREACHED_MESSAGE = "На активном пути нет итогового отчёта. Подключите блок «Отчёт» к выбранной ветке."
 MAX_NODES = 24
 MAX_EDGES = 48
 NODE_TYPES = scan.SCANNERS | {"trigger", "condition", "llm", "report"}
@@ -260,8 +263,18 @@ def execute_workflow(workflow, project):
             "event": "node", "id": node_id, "status": status, "message": message, "input": received,
             "output": output, **({"code": code} if code else {}),
         }
-    report = combined_report(report_types, results) if report_nodes else None
-    if report is not None and reported_explanations:
+    all_findings = combined_report(results.keys(), results)
+    gate = scan.release_gate(all_findings, results.keys())
+    if not report_nodes:
+        yield {"event": "error", "code": REPORT_UNREACHED, "error": REPORT_UNREACHED_MESSAGE,
+               "reports": [], "branches": branches, "release_gate": gate}
+        return
+
+    report = combined_report(report_types, results)
+    if reported_explanations:
         report["explanations"] = [reported_explanations[item["id"]] for item in report["findings"]
                                   if item["id"] in reported_explanations]
-    yield {"event": "result", "report": report, "reports": report_nodes, "branches": branches}
+    yield {
+        "event": "result", "report": report, "reports": report_nodes, "branches": branches,
+        "release_gate": gate, "submission": submission_report(report),
+    }
