@@ -9,13 +9,14 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 
 import scan
+from backend.llm import LLMError, explain_findings
 from backend.service import InvalidInput
 
 
 MAX_GRAPH_BYTES = 16 * 1024
 MAX_NODES = 24
 MAX_EDGES = 48
-NODE_TYPES = scan.SCANNERS | {"trigger", "condition", "report"}
+NODE_TYPES = scan.SCANNERS | {"trigger", "condition", "llm", "report"}
 NODE_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}")
 SEVERITY_RANK = {level: rank for rank, level in enumerate(("low", "medium", "high", "critical"))}
 FIELDS = {"scanner", "severity", "file", "rule", "cve", "advisoryId", "package", "line"}
@@ -197,7 +198,9 @@ def preview(findings):
 def execute_workflow(workflow, project):
     order, incoming = workflow
     results, outputs, branches = {}, {}, {}
+    explanation_outputs = {}
     report_types = set()
+    reported_explanations = {}
     report_nodes = []
     for item in order:
         node_id, kind = item.id, item.kind
@@ -207,10 +210,14 @@ def execute_workflow(workflow, project):
             yield {"event": "node", "id": node_id, "status": "skipped", "message": "Входная ветка не активна."}
             continue
         types = frozenset().union(*(outputs[edge.source] for edge in linked))
+        explanations = {}
+        for edge in linked:
+            explanations.update(explanation_outputs[edge.source])
         found = combined_report(types, results)["findings"]
         received = {"sources": [edge.source for edge in linked], "count": len(found), "findings": preview(found)}
         yield {"event": "node", "id": node_id, "status": "running", "input": received}
         status, message, branch, matched = "done", "", None, None
+        code = None
         try:
             if kind in scan.SCANNERS:
                 if kind not in results:
@@ -225,8 +232,16 @@ def execute_workflow(workflow, project):
                 matched = condition_match(item.config, found)
                 branch = "true" if matched is not None else "false"
                 branches[node_id] = branch
+            elif kind == "llm":
+                try:
+                    for explanation in explain_findings(found):
+                        explanations[explanation["finding_id"]] = explanation
+                except LLMError as exc:
+                    code, message = exc.code, str(exc)
+                    status = "skipped" if code in {"llm-not-configured", "llm-no-findings"} else "failed"
             elif kind == "report":
                 report_types.update(types)
+                reported_explanations.update(explanations)
                 report_nodes.append(node_id)
         except (InvalidInput, OSError) as exc:
             message = str(exc) if isinstance(exc, InvalidInput) else "Не удалось прочитать файлы учебного проекта."
@@ -235,11 +250,18 @@ def execute_workflow(workflow, project):
             return
 
         outputs[node_id] = types
+        explanation_outputs[node_id] = explanations
         found = combined_report(types, results)["findings"]
+        output = {"count": len(found), "findings": preview(found), "branch": branch,
+                  "matched": preview([matched])[0] if matched is not None else None}
+        if kind in {"llm", "report"}:
+            output["explanations"] = list(explanations.values())
         yield {
             "event": "node", "id": node_id, "status": status, "message": message, "input": received,
-            "output": {"count": len(found), "findings": preview(found), "branch": branch,
-                       "matched": preview([matched])[0] if matched is not None else None},
+            "output": output, **({"code": code} if code else {}),
         }
-    yield {"event": "result", "report": combined_report(report_types, results) if report_nodes else None,
-           "reports": report_nodes, "branches": branches}
+    report = combined_report(report_types, results) if report_nodes else None
+    if report is not None and reported_explanations:
+        report["explanations"] = [reported_explanations[item["id"]] for item in report["findings"]
+                                  if item["id"] in reported_explanations]
+    yield {"event": "result", "report": report, "reports": report_nodes, "branches": branches}
