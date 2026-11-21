@@ -240,7 +240,7 @@ def deliver_webhook(node, payload):
                            output={"attempts": attempts, "http_status": http_status})
 
 
-def execute_workflow(workflow, project, *, workflow_id=None, project_name=DEMO_PROJECT):
+def execute_workflow(workflow, project, *, local_provider=None, workflow_id=None, project_name=DEMO_PROJECT):
     order, incoming = workflow
     results, outputs, branches = {}, {}, {}
     explanation_outputs = {}
@@ -289,7 +289,7 @@ def execute_workflow(workflow, project, *, workflow_id=None, project_name=DEMO_P
                 branches[node_id] = branch
             elif kind == "llm":
                 try:
-                    analysis = analyze_findings(found)
+                    analysis = analyze_findings(found, local_provider=local_provider)
                     for explanation in analysis.pop("explanations"):
                         explanations[explanation["finding_id"]] = explanation
                     ai_runs[node_id] = analysis
