@@ -7,6 +7,7 @@
   <title>GHOST//GUARD</title>
   <link rel="stylesheet" href="./styles.css">
   <script src="./app.js" type="module"></script>
+  <script src="./src/effects.jsx" type="module"></script>
 </head>
 <body>
   <header class="topbar">
@@ -18,7 +19,7 @@
 
   <main class="workspace">
     <div class="page-heading">
-      <h1>Проверка проекта</h1>
+      <h1 id="page-title">Проверка проекта</h1>
       <p>Соберите проверку Kotlin-проекта перед релизом и увидьте, какие находки повлияли на решение.</p>
     </div>
 
@@ -86,7 +87,7 @@
         <p id="workflow-note" class="workflow-note" role="status">Выберите источник и запустите сценарий.</p>
       </section>
 
-      <section class="panel report" aria-labelledby="report-title">
+      <section class="panel report" id="report" aria-labelledby="report-title">
         <header class="panel-header">
           <div class="report-heading"><h2 id="report-title">Находки</h2><span id="match-count" hidden></span></div>
           <div id="report-actions" class="report-actions" hidden>
@@ -99,8 +100,23 @@
               <option value="low">Низкий</option>
             </select>
             <button type="button" id="download" class="secondary">Скачать JSON</button>
+            <button type="button" id="rerun" class="primary">Повторить проверку</button>
           </div>
         </header>
+        <section id="result-summary" class="result-summary" role="status" aria-live="polite" aria-atomic="true" hidden>
+          <div class="result-lead">
+            <span id="result-status" class="result-status">PASS</span>
+            <div>
+              <h3 id="result-title"></h3>
+              <p id="result-detail"></p>
+            </div>
+          </div>
+          <dl class="severity-counts" aria-label="Количество находок по критичности">
+            <div><dt>Критические</dt><dd id="critical-count">0</dd></div>
+            <div><dt>Высокие</dt><dd id="high-count">0</dd></div>
+            <div><dt>Остальные</dt><dd id="other-count">0</dd></div>
+          </dl>
+        </section>
         <p id="empty" class="empty">Здесь появятся результаты проверки.</p>
         <ul id="warnings" class="warnings" hidden></ul>
         <ul id="findings" class="findings" hidden></ul>

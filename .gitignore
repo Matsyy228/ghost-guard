@@ -1,5 +1,7 @@
 .venv/
 .runtime/
+frontend/dist/
+frontend/node_modules/
 __pycache__/
 *.py[cod]
 .env

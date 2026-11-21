@@ -15,7 +15,7 @@ const fieldOptions = [
 const modes = [["severity", "Порог критичности"], ["compare", "Сравнение"], ["regex", "Регулярное выражение"]];
 const operators = [["eq", "Равно"], ["ne", "Не равно"], ["gt", "Больше"], ["gte", "Не меньше"], ["lt", "Меньше"], ["lte", "Не больше"]];
 const branchNames = { true: "Да", false: "Нет" };
-const WIDTH = 122;
+const WIDTH = 132;
 const HEIGHT = 86;
 const LINK_HINT = "Для связи нажмите выход блока, затем вход другого блока.";
 
@@ -26,13 +26,15 @@ function element(tag, text = "", className = "") {
   return item;
 }
 
-function template() {
+function template(width = 960) {
+  const spacing = Math.max(156, Math.floor((width - 32 - WIDTH) / 5));
   const nodes = ["trigger", "secrets", "sca", "sast", "condition"].map((type, index) => ({
-    id: type, type, x: 16 + index * 140, y: 115,
+    id: type, type, x: 16 + index * spacing, y: 115,
   }));
   nodes.at(-1).config = { mode: "severity", value: "high" };
-  nodes.push({ id: "risk-report", type: "report", label: "Отчёт о рисках", x: 716, y: 48 },
-    { id: "low-report", type: "report", label: "Ниже порога", x: 716, y: 182 });
+  const reportX = 16 + 5 * spacing;
+  nodes.push({ id: "risk-report", type: "report", label: "Отчёт о рисках", x: reportX, y: 48 },
+    { id: "low-report", type: "report", label: "Ниже порога", x: reportX, y: 182 });
   const edges = nodes.slice(1, 5).map((item, index) => ({ source: nodes[index].id, target: item.id, branch: null }));
   edges.push({ source: "condition", target: "risk-report", branch: "true" },
     { source: "condition", target: "low-report", branch: "false" });
@@ -40,19 +42,20 @@ function template() {
 }
 
 export function createEditor(ui, onEdit) {
-  let graph = template();
-  let selected = "condition";
-  let nextId = 1;
-  let pending = null;
-  let busy = false;
-  const events = new Map();
-  const cards = new Map();
   const stage = ui["graph-stage"];
   const canvas = ui["graph-lines"];
   const nodeLayer = ui["graph-nodes"];
   const settings = ui["node-settings"];
   const dataView = ui["node-data"];
   const hint = ui["graph-hint"];
+  let graph = template(ui["graph-viewport"].clientWidth || 960);
+  let selected = "condition";
+  let nextId = 1;
+  let pending = null;
+  let busy = false;
+  let autoLayout = true;
+  const events = new Map();
+  const cards = new Map();
   const find = (id) => graph.nodes.find((item) => item.id === id);
   const name = (id) => {
     const item = find(id);
@@ -96,6 +99,30 @@ export function createEditor(ui, onEdit) {
     card.style.top = `${item.y}px`;
   }
 
+  function resizeStage() {
+    const viewport = ui["graph-viewport"];
+    const availableWidth = viewport.clientWidth;
+    if (autoLayout) {
+      const positions = new Map(template(availableWidth || 960).nodes.map(({ id, x, y }) => [id, { x, y }]));
+      for (const item of graph.nodes) {
+        const layout = positions.get(item.id);
+        if (layout) Object.assign(item, layout);
+      }
+    }
+    const contentWidth = Math.max(...graph.nodes.map((item) => item.x + WIDTH + 16));
+    const contentHeight = Math.max(...graph.nodes.map((item) => item.y + HEIGHT + 20));
+    const targetHeight = Math.min(720, Math.max(300, Math.round(window.innerHeight * 0.5)));
+    stage.style.width = `${Math.max(availableWidth, contentWidth)}px`;
+    stage.style.height = `${Math.max(targetHeight, contentHeight)}px`;
+    if (autoLayout) {
+      for (const item of graph.nodes) {
+        const card = cards.get(item.id);
+        if (card) position(item, card);
+      }
+    }
+    draw();
+  }
+
   function setHint(message = LINK_HINT) {
     hint.textContent = message;
   }
@@ -117,7 +144,9 @@ export function createEditor(ui, onEdit) {
     draw();
   }
 
-  function edit({ rebuild = true, message = LINK_HINT } = {}) {
+  function edit({ rebuild = true, message = LINK_HINT, resetLayout = false } = {}) {
+    if (resetLayout) autoLayout = true;
+    else if (rebuild) autoLayout = false;
     events.clear();
     setHint(message);
     if (rebuild) renderNodes();
@@ -195,6 +224,7 @@ export function createEditor(ui, onEdit) {
     });
     handle.addEventListener("pointermove", (event) => {
       if (!start || start.pointer !== event.pointerId) return;
+      autoLayout = false;
       item.x = Math.round(Math.max(12, Math.min(stage.offsetWidth - WIDTH - 12, start.left + event.clientX - start.x)));
       item.y = Math.round(Math.max(12, Math.min(stage.offsetHeight - HEIGHT - 12, start.top + event.clientY - start.y)));
       position(item, card);
@@ -210,7 +240,7 @@ export function createEditor(ui, onEdit) {
   }
 
   function renderNodes() {
-    stage.style.height = `${Math.max(316, ...graph.nodes.map((item) => item.y + HEIGHT + 20))}px`;
+    resizeStage();
     cards.clear();
     for (const item of graph.nodes) cards.set(item.id, makeCard(item));
     nodeLayer.replaceChildren(...cards.values());
@@ -403,7 +433,8 @@ export function createEditor(ui, onEdit) {
     const type = ui["node-type"].value;
     const count = nextId++;
     const index = graph.nodes.filter((item) => item.id.startsWith("block-")).length;
-    const item = { id: `block-${count}`, type, label: `${typeNames[type]} ${count}`, x: 16 + (index % 6) * 140, y: 326 + Math.floor(index / 6) * 108 };
+    const spacing = Math.max(156, Math.floor((stage.offsetWidth - 32 - WIDTH) / 5));
+    const item = { id: `block-${count}`, type, label: `${typeNames[type]} ${count}`, x: 16 + (index % 6) * spacing, y: 326 + Math.floor(index / 6) * 108 };
     if (type === "condition") item.config = { mode: "severity", value: "high" };
     graph.nodes.push(item);
     selected = item.id;
@@ -412,14 +443,16 @@ export function createEditor(ui, onEdit) {
     cards.get(item.id).scrollIntoView({ block: "nearest", inline: "nearest" });
   });
   ui["reset-graph"].addEventListener("click", () => {
-    graph = template();
+    graph = template(ui["graph-viewport"].clientWidth || 960);
     selected = "condition";
     pending = null;
     nextId = 1;
-    edit();
+    edit({ resetLayout: true });
     ui["graph-viewport"].scrollTo(0, 0);
   });
-  window.addEventListener("resize", draw);
+  window.addEventListener("resize", resizeStage);
+  const resizeObserver = new ResizeObserver(resizeStage);
+  resizeObserver.observe(ui["graph-viewport"]);
   renderNodes();
 
   return {

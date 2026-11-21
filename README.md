@@ -4,7 +4,7 @@ GHOST//GUARD помогает небольшой команде настроит
 
 ## Установка
 
-1. Установите **Python 3.12 или новее** и откройте папку `хахатон` в VS Code через **File → Open Folder**.
+1. Установите **Python 3.12+** и **Node.js 22.13+**. Откройте корень репозитория в VS Code через **File → Open Folder**.
 2. Откройте **Terminal → New Terminal** и выполните в PowerShell из корня проекта:
 
    ```powershell
@@ -14,7 +14,14 @@ GHOST//GUARD помогает небольшой команде настроит
    ```
 
    Если `.venv` уже есть и команда проверки версии работает, используйте существующее окружение. Если `py` недоступна, а `python --version` показывает Python 3.12 или новее, создайте окружение командой `python -m venv --without-pip .venv`.
-3. Backend использует стандартную библиотеку Python. Frontend использует HTML, CSS и JavaScript. Установка пакетов и сборка не требуются.
+3. Установите pnpm, если его ещё нет, и зависимости frontend:
+
+   ```powershell
+   npm install --global pnpm@11.25.0
+   pnpm --dir frontend install --frozen-lockfile
+   ```
+
+   Vite собирает страницу и бесплатные компоненты React Bits. Backend использует стандартную библиотеку Python.
 
 ## Запуск из терминала VS Code
 
@@ -26,17 +33,19 @@ GHOST//GUARD помогает небольшой команде настроит
 .\.venv\Scripts\python.exe -B -u -m backend.server
 ```
 
-Проверка API доступна по [127.0.0.1:8000/api/health](http://127.0.0.1:8000/api/health). Ожидаемый ответ — `{"status":"ok"}`.
+Проверка API доступна на [127.0.0.1:8000/api/health](http://127.0.0.1:8000/api/health). Ответ содержит статус, версию API и идентификатор сборки. Команда `.\.venv\Scripts\python.exe -B -m backend.version --check` сверяет запущенную сборку с исходниками.
 
 **Терминал 2 — frontend**
 
 ```powershell
-.\.venv\Scripts\python.exe -B -u -m http.server 5173 --bind 127.0.0.1 --directory frontend
+pnpm --dir frontend run dev
 ```
 
 Откройте [127.0.0.1:5173](http://127.0.0.1:5173), оставьте источник **Демо** и нажмите **Запустить проверку**. Шаблон выдаст три синтетические находки, по одной от каждого сканера. Оба сервера останавливаются через **Ctrl+C** в своих терминалах.
 
-Те же команды доступны через **Terminal → Run Task → Start app (frontend + backend)**. Перезапускайте backend после изменения Python-кода и обновляйте вкладку браузера после изменения frontend.
+Те же команды доступны через **Terminal → Run Task → Start app (frontend + backend)**. Перезапускайте backend после изменения Python-кода. Vite сам обновляет страницу при изменении frontend.
+
+Для сборки используйте `pnpm --dir frontend run build`. Бесплатный реестр React Bits указан в `frontend/components.json`. Чтобы добавить ещё один компонент, откройте папку `frontend` и выполните `pnpm dlx shadcn@latest add @react-bits/Название-JS-CSS`, подставив имя из каталога.
 
 ## Редактор и проверка ветвления
 
