@@ -6,11 +6,12 @@ import { renderFindings, scannerNames, sortedFindings } from "./report.js";
 import demoReport from "./demo-report.json";
 
 const ui = Object.fromEntries([...document.querySelectorAll("[id]")].map((element) => [element.id, element]));
-const state = { phase: "idle", mode: "demo", connection: "pending", result: null };
+const state = { phase: "idle", mode: "demo", connection: "pending", result: null, reportContext: null };
+const reportTimeFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
 let connectionCheck;
 
 const editor = createEditor(ui, () => {
-  resetResult("Запустите сценарий с обновлёнными настройками.");
+  invalidateResult("Запустите сценарий с обновлёнными настройками.");
 });
 
 function clearError() {
@@ -18,9 +19,14 @@ function clearError() {
   ui.error.textContent = "";
 }
 
-function resetResult(note) {
-  state.phase = "idle";
-  state.result = null;
+function invalidateResult(note) {
+  if (state.phase === "ready" || state.phase === "stale") {
+    state.phase = "stale";
+  } else {
+    state.phase = "idle";
+    state.result = null;
+    state.reportContext = null;
+  }
   clearError();
   ui["workflow-note"].textContent = note;
   setRunStatus("Готов к запуску");
@@ -37,7 +43,7 @@ function setMode(mode) {
   ui["upload-inputs"].hidden = !upload;
   ui.project.required = upload;
   editor.clearResults();
-  resetResult(upload ? "Загрузите ZIP проекта и запустите сценарий." : "Запустите сценарий на встроенном учебном проекте.");
+  invalidateResult(upload ? "Загрузите ZIP проекта и запустите сценарий." : "Запустите сценарий на встроенном учебном проекте.");
 }
 
 function refreshConnection() {
@@ -67,13 +73,49 @@ function linkAction(href, label) {
   ui["next-action"].replaceChildren(document.createTextNode(label), arrow);
 }
 
+function renderReportContext(gate) {
+  const context = state.reportContext;
+  ui["result-meta"].hidden = !context;
+  if (!context) return;
+
+  ui["result-source"].textContent = {
+    demo: "Демо · учебные данные",
+    upload: `ZIP · ${context.fileName}`,
+    snapshot: "Резервный пример · учебные данные",
+  }[context.source];
+
+  const { receivedAt } = context;
+  ui["result-time-row"].hidden = !receivedAt;
+  if (receivedAt) {
+    ui["result-time"].dateTime = receivedAt.toISOString();
+    ui["result-time"].textContent = reportTimeFormat.format(receivedAt);
+  } else {
+    ui["result-time"].removeAttribute("datetime");
+    ui["result-time"].textContent = "";
+  }
+
+  if (!Array.isArray(gate?.missing_scanners)) {
+    ui["result-coverage"].textContent = "Список сканеров недоступен.";
+    return;
+  }
+  const missing = gate.missing_scanners;
+  const included = Object.keys(scannerNames).filter((scanner) => !missing.includes(scanner));
+  const coverage = included.length
+    ? `Выполнены: ${included.map((scanner) => scannerNames[scanner]).join(", ")}`
+    : "Сканеры не выполнялись";
+  const skipped = missing.map((scanner) => scannerNames[scanner] ?? scanner);
+  ui["result-coverage"].textContent = skipped.length
+    ? `${coverage} · Пропущены: ${skipped.join(", ")}`
+    : coverage;
+}
+
 function renderOverview() {
   const { phase, connection, result } = state;
   const gate = result?.release_gate;
   const decision = {
     BLOCK: ["block", "Выпуск заблокирован"],
     WARNING: ["warning", "Требуется проверка"],
-    PASS: ["pass", "Проверка пройдена"],
+    PASS: ["pass", "По выполненным проверкам блокировок нет"],
   }[gate?.status];
 
   let status = "idle";
@@ -93,6 +135,12 @@ function renderOverview() {
     next = "Статусы отдельных блоков обновляются на схеме.";
     href = "#workflow";
     action = "Смотреть ход проверки";
+  } else if (phase === "stale") {
+    status = "stale";
+    badge = "УСТАРЕЛ";
+    title = "Показан предыдущий результат";
+    detail = "Сценарий или входные данные изменились после этого запуска.";
+    next = connection === "offline" ? "Восстановите API и запустите проверку заново." : "Запустите проверку с текущими настройками.";
   } else if (phase === "error" || phase === "idle" && connection === "offline") {
     badge = "НЕТ ОТЧЁТА";
     title = phase === "error" ? "Проверка не завершилась" : "API недоступен для проверки";
@@ -110,12 +158,11 @@ function renderOverview() {
     if (counts?.critical) reasons.push(`критических — ${counts.critical}`);
     if (counts?.high) reasons.push(`высоких — ${counts.high}`);
     if (counts?.medium || counts?.low) reasons.push(`средних и низких — ${counts.medium + counts.low}`);
-    if (missing.length) reasons.push(`не выполнялись ${missing.join(", ")}`);
     if (gate?.skipped_files) reasons.push(`пропущено файлов — ${gate.skipped_files}`);
     if (gate?.unresolved_versions) reasons.push(`не определено версий — ${gate.unresolved_versions}`);
-    detail = reasons.length ? reasons.join(" · ") : (decision
-      ? "Все сканеры отработали. Находок нет."
-      : "Отчёт доступен для просмотра.");
+    detail = reasons.length ? reasons.join(" · ") : missing.length
+      ? "Часть сканеров пропущена."
+      : "Отчёт доступен для просмотра.";
     if (phase === "snapshot") {
       status = "idle";
       title = decision ? `Учебный пример · ${gate.status}` : "Учебный пример";
@@ -134,12 +181,13 @@ function renderOverview() {
   ui["priority-title"].textContent = prompt;
   ui["priority-text"].textContent = next;
   linkAction(href, action);
+  renderReportContext(gate);
 }
 
 function render(animate = false) {
   renderOverview();
   renderFeedback();
-  renderFindings(ui, state.result?.report, { phase: state.phase, mode: state.mode, animate });
+  renderFindings(ui, state.result?.report, { phase: state.phase, context: state.reportContext, animate });
 }
 
 function setRunStatus(text, status = "idle") {
@@ -166,12 +214,14 @@ async function runScan(event) {
   event.preventDefault();
   if (state.phase === "running") return;
   const demo = state.mode === "demo";
+  const fileName = demo ? null : ui.project.files[0].name;
   const body = demo ? new FormData() : new FormData(ui["scan-form"]);
   if (!ui.catalog.files.length) body.delete("catalog");
   body.append("workflow", new Blob([JSON.stringify(editor.payload())], { type: "application/json" }), "workflow.json");
 
   state.phase = "running";
   state.result = null;
+  state.reportContext = null;
   ui.severity.value = "all";
   setBusy(true);
   setRunStatus("Выполняется", "busy");
@@ -181,10 +231,22 @@ async function runScan(event) {
 
   try {
     if (!await refreshConnection()) throw new Error("Запустите backend из текущего репозитория и проверьте подключение.");
-    const result = await runWorkflow(body, editor.showEvent);
+    const failedNodes = new Set();
+    const result = await runWorkflow(body, (event) => {
+      editor.showEvent(event);
+      if (event.status === "failed") failedNodes.add(event.id);
+      else failedNodes.delete(event.id);
+    });
     state.result = result;
+    state.reportContext = {
+      source: demo ? "demo" : "upload",
+      fileName,
+      receivedAt: new Date(),
+      failedBlocks: [...failedNodes].map(editor.name),
+    };
     state.phase = "ready";
-    setRunStatus("Завершено", "done");
+    if (failedNodes.size) setRunStatus("Отчёт готов · есть ошибки блоков", "error");
+    else setRunStatus("Завершено", "done");
     const branches = Object.entries(result.branches ?? {}).map(([id, branch]) => `${editor.name(id)}: ${branch === "true" ? "Да" : "Нет"}`);
     const reports = (result.reports ?? []).map(editor.name).join(", ");
     ui["workflow-note"].textContent = [...branches, reports && `Сформирован отчёт «${reports}»`].filter(Boolean).join(" · ") || "Сценарий завершён.";
@@ -211,6 +273,7 @@ function openOfflineReport() {
   editor.clearResults();
   state.phase = "snapshot";
   state.result = demoReport;
+  state.reportContext = { source: "snapshot" };
   ui.severity.value = "all";
   clearError();
   setRunStatus("Нет активного запуска");
@@ -224,7 +287,10 @@ function downloadReport() {
   const url = URL.createObjectURL(new Blob([JSON.stringify(state.result.report, null, 2)], { type: "application/json" }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = state.phase === "snapshot" ? "ghost-guard-demo-report.json" : "security-report.json";
+  link.download = {
+    snapshot: "ghost-guard-demo-report.json",
+    stale: "security-report-previous.json",
+  }[state.phase] ?? "security-report.json";
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
@@ -242,7 +308,7 @@ ui["upload-mode"].addEventListener("click", () => setMode("upload"));
 for (const input of [ui.project, ui.catalog]) {
   input.addEventListener("change", () => {
     editor.clearResults();
-    resetResult("Входные данные изменились. Запустите сценарий ещё раз.");
+    invalidateResult("Входные данные изменились. Запустите сценарий ещё раз.");
   });
 }
 ui["scan-form"].addEventListener("submit", runScan);

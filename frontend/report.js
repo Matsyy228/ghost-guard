@@ -69,7 +69,7 @@ function findingElement(finding, explanation, open) {
   return row;
 }
 
-export function renderFindings(elements, report, { phase, mode, animate }) {
+export function renderFindings(elements, report, { phase, context, animate }) {
   const all = sortedFindings(report?.findings ?? []);
   const filter = elements.severity.value;
   const findings = all.filter(({ severity }) => filter === "all" || severity === filter);
@@ -89,10 +89,18 @@ export function renderFindings(elements, report, { phase, mode, animate }) {
   elements.rerun.hidden = snapshot;
   elements["findings-header"].hidden = !hasReport;
   elements["match-count"].textContent = `${findings.length} из ${all.length}`;
-  elements["report-notice"].hidden = !hasReport || (!snapshot && mode !== "demo");
-  elements["report-notice"].textContent = snapshot
-    ? "Резервный пример · встроенные учебные данные. Новый анализ не выполнялся."
-    : "Учебный проект · результаты проверки синтетических данных.";
+  const notes = [];
+  if (phase === "stale") notes.push("Предыдущий отчёт. Сценарий или входные данные изменились.");
+  if (snapshot) notes.push("Резервный пример · встроенные учебные данные. Новый анализ не выполнялся.");
+  if (context?.source === "demo") notes.push("Учебный проект · результаты проверки синтетических данных.");
+  const failedBlocks = context?.failedBlocks ?? [];
+  if (failedBlocks.length) {
+    notes.push(`Отчёт получен с ошибками блоков: ${failedBlocks.join(", ")}.`);
+    if (phase === "ready") notes.push("Подробности в сценарии.");
+  }
+  elements["report-notice"].hidden = !hasReport || !notes.length;
+  elements["report-notice"].dataset.status = phase === "stale" || failedBlocks.length ? "warning" : "info";
+  elements["report-notice"].textContent = notes.join(" ");
 
   const warnings = [];
   if (report?.sca?.status === "catalog-missing") warnings.push("SCA пропущен. Для проверки зависимостей добавьте справочник JSON.");
