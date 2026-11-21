@@ -2,8 +2,10 @@
 
 import re
 import stat
+import zlib
 from contextlib import contextmanager
 from io import BytesIO
+from lzma import LZMAError
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import BadZipFile, ZipFile
@@ -68,9 +70,9 @@ def extract_sources(data, root):
                     output.write(source)
             if not paths:
                 raise InvalidInput("В ZIP нет исходников Kotlin, файлов Gradle или конфигурации Spring.")
-    except (BadZipFile, OSError, RuntimeError, NotImplementedError, ValueError) as exc:
-        if isinstance(exc, InvalidInput):
-            raise
+    except InvalidInput:
+        raise
+    except (BadZipFile, OSError, RuntimeError, ValueError, EOFError, zlib.error, LZMAError) as exc:
         raise InvalidInput("Не удалось распаковать ZIP. Проверьте формат и имена файлов.") from exc
 
 

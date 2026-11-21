@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from http.client import HTTPConnection
@@ -172,6 +174,38 @@ class WorkflowApiTests(unittest.TestCase):
         self.request("GET", "/api/workflows/" + "0" * 32 + "/last-run", expected=404)
 
 
+class TelegramWorkflowTests(unittest.TestCase):
+    def test_delivery_status_and_original_report(self):
+        workflow = compile_workflow(json.dumps(graph("trigger", "secrets", "telegram", "report")).encode())
+        settings = {"GHOST_TELEGRAM_BOT_TOKEN": "123:example", "GHOST_TELEGRAM_CHAT_ID": "-123"}
+        for env, http_status, response_body, expected_status, code in (
+            (settings, 200, b'{"ok":true,"result":{"message_id":42}}', "done", None),
+            (settings, 503, b"", "failed", "telegram-provider-error"),
+            (settings, 200, b'{"ok":false}', "failed", "telegram-invalid-response"),
+            ({}, 0, b"", "skipped", "telegram-not-configured"),
+        ):
+            with (self.subTest(code=code), patch.dict("os.environ", env, clear=True),
+                  patch("backend.telegram.HTTPSConnection") as connection):
+                response = connection.return_value.getresponse.return_value.__enter__.return_value
+                response.status = http_status
+                response.read.return_value = response_body
+                events = list(execute_workflow(workflow, demo_project()))
+                node = next(event for event in events if event.get("id") == "telegram" and event["status"] != "running")
+                self.assertEqual(node["status"], expected_status)
+                self.assertEqual(node.get("code"), code)
+                finding, = events[-1]["report"]["findings"]
+                if expected_status == "done":
+                    self.assertEqual(node["output"]["message_id"], 42)
+                    method, path, body, _ = connection.return_value.request.call_args.args
+                    self.assertEqual((method, path), ("POST", "/bot123:example/sendMessage"))
+                    message = json.loads(body)
+                    self.assertEqual(message["chat_id"], "-123")
+                    self.assertNotIn(finding["file"], message["text"])
+                    self.assertIn("Находок: 1", message["text"])
+                elif expected_status == "skipped":
+                    connection.assert_not_called()
+
+
 class ReleaseGateTests(unittest.TestCase):
     def test_blocks_release_even_when_findings_do_not_reach_the_report(self):
         workflow = graph("trigger", "secrets", "report")
@@ -189,6 +223,17 @@ class ReleaseGateTests(unittest.TestCase):
             self.assertEqual(incomplete["status"], "WARNING")
             self.assertEqual(incomplete["missing_scanners"], ["sca"])
             self.assertEqual(scan.release_gate(scan.scan(root, {}))["status"], "PASS")
+
+    def test_cli_blocks_release_and_keeps_the_organizer_schema(self):
+        result = subprocess.run(
+            [sys.executable, "-B", str(Path(scan.__file__)), str(DEMO / "project"), "--catalog",
+             str(DEMO / "catalog.json"), "--submission", "--release-gate"],
+            capture_output=True, check=False, timeout=10,
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(json.loads(result.stdout).keys(), {"findings"})
+        self.assertEqual(len(json.loads(result.stdout)["findings"]), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

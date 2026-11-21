@@ -165,6 +165,7 @@ def main():
     parser.add_argument("project", help="approved local training ZIP or the bundled demo directory")
     parser.add_argument("--catalog", type=Path, help="official Maven JSON catalog or bundled demo format")
     parser.add_argument("--submission", action="store_true", help="emit the organizer's JSON report format")
+    parser.add_argument("--release-gate", action="store_true", help="exit with code 1 when high or critical findings block release")
     args = parser.parse_args()
     try:
         if "://" in args.project or args.project.startswith(("\\\\", "//")):
@@ -183,8 +184,13 @@ def main():
             report = scan_upload(archive, catalog)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
+    if args.release_gate:
+        report["release_gate"] = release_gate(report)
     print(json.dumps(submission_report(report) if args.submission else report, indent=2))
+    if args.release_gate and report["release_gate"]["status"] == "BLOCK":
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

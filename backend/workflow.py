@@ -15,6 +15,7 @@ from backend.ai_summary import summarize
 from backend.llm import LLMError, analyze_findings
 from backend.service import InvalidInput
 from backend.webhook import DEMO_PROJECT, WebhookError, parse_url, report_payload, send_report
+from backend.telegram import TelegramError, send_summary
 
 
 MAX_GRAPH_BYTES = 16 * 1024
@@ -22,7 +23,7 @@ REPORT_UNREACHED = "workflow-report-unreached"
 REPORT_UNREACHED_MESSAGE = "На активном пути нет итогового отчёта. Подключите блок «Отчёт» к выбранной ветке."
 MAX_NODES = 24
 MAX_EDGES = 48
-NODE_TYPES = scan.SCANNERS | {"trigger", "condition", "llm", "report", "webhook"}
+NODE_TYPES = scan.SCANNERS | {"trigger", "condition", "llm", "telegram", "report", "webhook"}
 NODE_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}")
 SEVERITY_RANK = {level: rank for rank, level in enumerate(("low", "medium", "high", "critical"))}
 FIELDS = {"scanner", "severity", "file", "rule", "cve", "advisoryId", "package", "line"}
@@ -273,6 +274,7 @@ def execute_workflow(workflow, project, *, local_provider=None, workflow_id=None
         yield {"event": "node", "id": node_id, "status": "running", "input": received}
         status, message, branch, matched = "done", "", None, None
         code = None
+        message_id = None
         try:
             if kind in scan.SCANNERS:
                 if kind not in results:
@@ -297,6 +299,12 @@ def execute_workflow(workflow, project, *, local_provider=None, workflow_id=None
                     code, message = exc.code, str(exc)
                     ai_runs[node_id] = {"summary_code": code}
                     status = "skipped" if code in {"llm-not-configured", "llm-no-findings"} else "failed"
+            elif kind == "telegram":
+                try:
+                    message_id = send_summary(found, len(explanations))
+                except TelegramError as exc:
+                    code, message = exc.code, str(exc)
+                    status = "skipped" if code == "telegram-not-configured" else "failed"
             elif kind == "report":
                 report_types.update(types)
                 reported_explanations.update(explanations)
@@ -320,6 +328,8 @@ def execute_workflow(workflow, project, *, local_provider=None, workflow_id=None
             output["explanations"] = list(explanations.values())
         if kind == "llm":
             output["ai"] = ai_runs[node_id]
+        if message_id is not None:
+            output["message_id"] = message_id
         yield {
             "event": "node", "id": node_id, "status": status, "message": message, "input": received,
             "output": output, **({"code": code} if code else {}),
