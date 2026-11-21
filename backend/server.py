@@ -10,6 +10,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Event, Thread
 
+from backend.local_llm import LocalModel
+from backend.llm import LLMError
 from backend.service import (
     InvalidInput, MAX_ARCHIVE, MAX_CATALOG, runtime_directory, scan_demo, scan_upload, workflow_project,
 )
@@ -116,6 +118,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.path == "/api/health":
                 result = {"status": "ok", **IDENTITY}
+            elif self.path == "/api/llm/status":
+                result = self.server.local_model.status()
             elif self.path == WORKFLOWS_PATH:
                 result = {"workflows": self.server.workflows.list()}
             elif item and item[2] is None:
@@ -189,7 +193,7 @@ class Handler(BaseHTTPRequestHandler):
         with workflow_project(data.get("project"), data.get("catalog"),
                               source_policy=self.server.workflows.source_policy) as project:
             self.stream_workflow(execute_workflow(
-                workflow, project,
+                workflow, project, local_provider=self.server.workflows.local_provider,
                 project_name=ZIP_PROJECT if "project" in data else DEMO_PROJECT,
             ))
 
@@ -245,6 +249,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             elif self.path == "/api/demo":
                 result = scan_demo()
+            elif self.path == "/api/llm/probe":
+                result = self.server.local_model.probe()
             elif self.path == "/api/scans":
                 data = self.read_upload({"project", "catalog"})
                 result = scan_upload(data.get("project"), data.get("catalog"),
@@ -257,6 +263,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
         except RequestBodyError as exc:
             self.respond(exc.status, {"error": str(exc)})
+            return
+        except LLMError as exc:
+            status = HTTPStatus.CONFLICT if exc.code == "llm-probe-busy" else HTTPStatus.SERVICE_UNAVAILABLE
+            self.respond(status, {"code": exc.code, "error": str(exc), **self.server.local_model.status()})
             return
         except SourcePolicyError as exc:
             code = HTTPStatus.FORBIDDEN if exc.code == "source-not-approved" else HTTPStatus.SERVICE_UNAVAILABLE
@@ -292,7 +302,9 @@ class LocalHTTPServer(ThreadingHTTPServer):
 def main():
     with LocalHTTPServer((HOST, PORT), Handler) as server:
         runtime = runtime_directory()
-        server.workflows = WorkflowStore(runtime / "workflows.sqlite3")
+        model = LocalModel(runtime / "llm")
+        server.local_model = model
+        server.workflows = WorkflowStore(runtime / "workflows.sqlite3", local_provider=model.config)
         server.workflows.recover_interrupted()
         stopped = Event()
         Thread(target=run_scheduled, args=(server.workflows, stopped), daemon=True).start()
@@ -303,6 +315,7 @@ def main():
             pass
         finally:
             stopped.set()
+            model.close()
 
 
 if __name__ == "__main__":

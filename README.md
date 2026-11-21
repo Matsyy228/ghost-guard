@@ -117,28 +117,22 @@ scan.py         Обход файлов и консольная точка вх�
 
 ### Qwen2.5-1.5B Instruct на Windows
 
-Для локального запуска понадобятся веса модели GGUF Q4_K_M (1,12 ГБ) и сборка llama.cpp для Windows x64 с Vulkan. Сохраните файл модели в `.runtime/llm/`. Распакуйте сборку `llama-b12248-bin-win-vulkan-x64.zip` в `.runtime/llm/llama-b12248/` рядом с моделью. [Веса Qwen](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/blob/main/qwen2.5-1.5b-instruct-q4_k_m.gguf) · [Сборка llama.cpp b12248](https://github.com/ggml-org/llama.cpp/releases/tag/b12248)
-
-Запустите модель в отдельном терминале VS Code из корня проекта:
+Из корня проекта установите Qwen2.5-1.5B-Instruct GGUF Q4_K_M и llama.cpp b12248. Установщик скачивает закреплённые официальные файлы и сверяет размер и SHA-256. [Установка, офлайн-кэш и распространение](./docs/LOCAL_LLM_SETUP.md)
 
 ```powershell
-& .\.runtime\llm\llama-b12248\llama-server.exe `
-  --model .\.runtime\llm\qwen2.5-1.5b-instruct-q4_k_m.gguf `
-  --host 127.0.0.1 --port 11439 --alias ghost-qwen `
-  --ctx-size 4096 --parallel 1 --n-gpu-layers 99 --temp 0 --no-ui
+.\scripts\setup-local-llm.ps1
 ```
 
-Дождитесь `model loaded` в терминале модели. Затем запустите backend в другом терминале PowerShell:
+Затем запустите приложение обычной командой из раздела запуска. Backend сам поднимет llama.cpp при первом обращении ноды LLM и переиспользует процесс для ручных и запланированных проверок. Ключ провайдера указывать не нужно. Файлы лежат в `.runtime/llm/`, после установки модель работает локально без интернета.
+
+После запуска проверьте реальную генерацию из второго терминала:
 
 ```powershell
-$env:GHOST_LLM_BASE_URL = 'http://127.0.0.1:11439/v1'
-$env:GHOST_LLM_MODEL = 'ghost-qwen'
-.\.venv\Scripts\python.exe -B -u -m backend.server
+Invoke-RestMethod http://127.0.0.1:8000/api/llm/status
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/llm/probe
 ```
 
-Локальной модели ключ не нужен. Скачанные файлы в `.runtime/` исключены из Git. После загрузки файлов модель работает без интернета.
-
-Для Ollama укажите `http://127.0.0.1:11434/v1` и имя установленной модели. Для удалённого провайдера задайте его HTTPS-адрес API, имя модели и `GHOST_LLM_API_KEY` в окружении сервера. [Документация Ollama](https://docs.ollama.com/api/openai-compatibility)
+При явной настройке провайдера укажите `GHOST_LLM_BASE_URL` и `GHOST_LLM_MODEL`. Для Ollama задайте `http://127.0.0.1:11434/v1` и имя установленной модели. Для удалённого сервиса используйте HTTPS-адрес и `GHOST_LLM_API_KEY` в окружении backend. [Документация Ollama](https://docs.ollama.com/api/openai-compatibility)
 
 Запрос к модели содержит ID находки, правило, категорию, критичность, заголовок и подсказку сканера, а при наличии также ID записи из справочника. Сервер берёт файлы и строки из исходного отчёта. За один запрос объясняются до 20 находок, начиная с наиболее критичных.
 

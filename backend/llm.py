@@ -52,10 +52,23 @@ class NoRedirects(HTTPRedirectHandler):
         return None
 
 
-def provider_config():
+def llm_disabled():
+    return os.environ.get("GHOST_LLM_DISABLED", "").strip() == "1"
+
+
+def explicit_provider():
+    return any(os.environ.get(name, "").strip()
+               for name in ("GHOST_LLM_BASE_URL", "GHOST_LLM_MODEL", "GHOST_LLM_API_KEY"))
+
+
+def provider_config(local_provider=None):
+    if llm_disabled():
+        raise LLMError("llm-not-configured", "LLM отключена администратором.")
     base = os.environ.get("GHOST_LLM_BASE_URL", "").strip()
     model = os.environ.get("GHOST_LLM_MODEL", "").strip()
     key = os.environ.get("GHOST_LLM_API_KEY", "").strip()
+    if not (base or model or key) and local_provider is not None:
+        return local_provider()
     if not base or not model:
         raise LLMError("llm-not-configured", "Укажите адрес и модель LLM в окружении сервера.")
     try:
@@ -210,15 +223,15 @@ def validate_response(response, requested):
     return [validated[finding_id] for finding_id in requested]
 
 
-def explain_findings(findings):
-    return analyze_findings(findings)["explanations"]
+def explain_findings(findings, *, local_provider=None):
+    return analyze_findings(findings, local_provider=local_provider)["explanations"]
 
 
-def analyze_findings(findings):
+def analyze_findings(findings, *, local_provider=None):
     requested = request_metadata(findings)
     if not requested:
         raise LLMError("llm-no-findings", "Во входной ветке нет находок для объяснения.")
-    provider = provider_config()
+    provider = provider_config(local_provider)
     start = monotonic()
     response = call_provider(*provider, requested)
     duration_ms = round((monotonic() - start) * 1000)

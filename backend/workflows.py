@@ -97,8 +97,9 @@ def validate_save(data, archive, catalog, source_policy):
 
 
 class WorkflowStore:
-    def __init__(self, path, *, source_policy=None):
+    def __init__(self, path, *, local_provider=None, source_policy=None):
         self.path = path
+        self.local_provider = local_provider
         self.source_policy = source_policy or SourcePolicy()
         with self.connect() as db:
             db.executescript(SCHEMA)
@@ -250,7 +251,7 @@ class WorkflowStore:
             workflow = compile_workflow(claimed["graph"].encode("utf-8"))
             with workflow_project(claimed["archive"], claimed["catalog"], source_policy=self.source_policy) as project:
                 for event in execute_workflow(
-                    workflow, project, workflow_id=claimed["id"],
+                    workflow, project, local_provider=self.local_provider, workflow_id=claimed["id"],
                     project_name=ZIP_PROJECT if claimed["archive"] is not None else DEMO_PROJECT,
                 ):
                     if event["event"] in {"result", "error"}:

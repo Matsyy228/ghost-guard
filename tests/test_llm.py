@@ -50,6 +50,22 @@ class LLMTests(unittest.TestCase):
         self.assertNotIn("private-fixture-text", str(payload))
         self.assertEqual(result, [{**EXPLANATION, "file": FINDING["file"], "line": 7, "advisoryId": "CVE-2099-12345"}])
 
+    def test_managed_provider_is_used_only_without_an_explicit_provider(self):
+        endpoint = "http://127.0.0.1:8888/v1/chat/completions"
+        with (patch.dict("os.environ", {}, clear=True), patch("backend.llm.build_opener") as opener,
+              patch("backend.local_llm.LocalModel.config", return_value=(endpoint, "ghost-qwen", "local-key")) as local):
+            opener.return_value.open.side_effect = lambda *args, **kwargs: provider_response([EXPLANATION])
+            explain_findings([FINDING], local_provider=local)
+            request = opener.return_value.open.call_args.args[0]
+            self.assertEqual(request.full_url, endpoint)
+            self.assertEqual(request.get_header("Authorization"), "Bearer local-key")
+
+            with patch.dict("os.environ", SETTINGS):
+                explain_findings([FINDING], local_provider=local)
+            local.assert_called_once()
+            self.assertEqual(opener.return_value.open.call_args.args[0].full_url,
+                             "http://127.0.0.1:11434/v1/chat/completions")
+
     def test_rejects_wrong_ids_advisories_and_locations(self):
         invalid = [
             [{**EXPLANATION, "finding_id": "SCA-F9999"}],
