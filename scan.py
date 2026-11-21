@@ -158,18 +158,31 @@ def release_gate(report, scanners=SCANNERS):
 
 
 def main():
+    from backend.service import DEMO, MAX_CATALOG, scan_upload
+    from backend.source_policy import read_local_archive
+
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("project", type=Path, help="local directory with the training project")
+    parser.add_argument("project", help="approved local training ZIP or the bundled demo directory")
     parser.add_argument("--catalog", type=Path, help="official Maven JSON catalog or bundled demo format")
     parser.add_argument("--submission", action="store_true", help="emit the organizer's JSON report format")
     args = parser.parse_args()
-    if not args.project.is_dir():
-        parser.error("project must be an existing directory")
     try:
-        catalog = load_catalog(args.catalog)
+        if "://" in args.project or args.project.startswith(("\\\\", "//")):
+            raise ValueError("remote project sources are not supported")
+        local = Path(args.project)
+        if local.absolute() == DEMO / "project":
+            report = scan(local.resolve(), load_catalog(args.catalog))
+        else:
+            if local.is_dir():
+                raise ValueError("pack the local training project as ZIP and approve it with python -m backend.source_policy")
+            archive = read_local_archive(local)
+            catalog = None
+            if args.catalog is not None:
+                with args.catalog.open("rb") as stream:
+                    catalog = stream.read(MAX_CATALOG + 1)
+            report = scan_upload(archive, catalog)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
-    report = scan(args.project.resolve(), catalog)
     print(json.dumps(submission_report(report) if args.submission else report, indent=2))
 
 

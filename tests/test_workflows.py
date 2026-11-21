@@ -14,6 +14,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import scan
 from backend.server import Handler
 from backend.service import DEMO, demo_project
+from backend.source_policy import SourcePolicy
 from backend.workflow import compile_workflow, execute_workflow
 from backend.workflows import WorkflowStore, run_scheduled
 
@@ -37,8 +38,9 @@ class WorkflowApiTests(unittest.TestCase):
     def setUp(self):
         directory = self.enterContext(TemporaryDirectory())
         self.path = Path(directory) / "workflows.sqlite3"
+        self.policy = SourcePolicy(Path(directory) / "approved")
         self.server = self.enterContext(ThreadingHTTPServer(("127.0.0.1", 0), Handler))
-        self.server.workflows = WorkflowStore(self.path)
+        self.server.workflows = WorkflowStore(self.path, source_policy=self.policy)
         self.enterContext(patch.object(Handler, "log_message"))
         worker = Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         worker.start()
@@ -71,10 +73,11 @@ class WorkflowApiTests(unittest.TestCase):
                     archive.write(source, source.relative_to(DEMO / "project"))
         payload = {"settings": json.dumps(self.settings).encode(), "project": buffer.getvalue(),
                    "catalog": (DEMO / "catalog.json").read_bytes()}
+        self.policy.approve(payload["project"])
         body, headers = multipart(**payload)
         saved = self.request("POST", "/api/workflows", body, headers, expected=201)
         path = f"/api/workflows/{saved['id']}"
-        self.server.workflows = WorkflowStore(self.path)
+        self.server.workflows = WorkflowStore(self.path, source_policy=self.policy)
         self.assertEqual(self.request("GET", path), saved)
         self.assertEqual(saved["workflow"], self.workflow)
         self.assertEqual(saved["source"], "zip")
@@ -157,7 +160,11 @@ class WorkflowApiTests(unittest.TestCase):
         path = f"/api/workflows/{saved['id']}"
         self.request("PUT", path, {**self.settings, "interval_seconds": True}, expected=400)
         self.request("PUT", path, {**self.settings, "workflow": {"nodes": [], "edges": []}}, expected=400)
-        body, headers = multipart(settings=json.dumps(self.settings).encode(), project=b"invalid ZIP")
+        unsupported = BytesIO()
+        with ZipFile(unsupported, "w") as archive:
+            archive.writestr("README.txt", "No project sources")
+        self.policy.approve(unsupported.getvalue())
+        body, headers = multipart(settings=json.dumps(self.settings).encode(), project=unsupported.getvalue())
         self.request("PUT", path, body, headers, expected=400)
         self.assertEqual(self.request("GET", path), saved)
         self.request("GET", path, headers={"Host": "external.example"}, expected=403)

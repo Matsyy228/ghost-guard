@@ -23,7 +23,8 @@ def build_id():
     return digest.hexdigest()[:16]
 
 
-IDENTITY = {"service": SERVICE, "api_version": API_VERSION, "build_id": build_id()}
+IDENTITY = {"service": SERVICE, "api_version": API_VERSION, "build_id": build_id(),
+            "source_policy": "operator-sha256"}
 
 
 def check_running():

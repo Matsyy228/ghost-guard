@@ -14,6 +14,7 @@ from backend.service import (
     InvalidInput, MAX_ARCHIVE, MAX_CATALOG, runtime_directory, scan_demo, scan_upload, workflow_project,
 )
 from backend.version import HOST, PORT, IDENTITY
+from backend.source_policy import SourcePolicyError
 from backend.webhook import DEMO_PROJECT, ZIP_PROJECT
 from backend.workflow import MAX_GRAPH_BYTES, compile_workflow, execute_workflow
 from backend.workflows import WorkflowNotFound, WorkflowStore, run_scheduled
@@ -185,7 +186,8 @@ class Handler(BaseHTTPRequestHandler):
         workflow = compile_workflow(data.get("workflow"))
         if "project" not in data and "catalog" in data:
             raise InvalidInput("Для загружаемого справочника нужен ZIP проекта.")
-        with workflow_project(data.get("project"), data.get("catalog")) as project:
+        with workflow_project(data.get("project"), data.get("catalog"),
+                              source_policy=self.server.workflows.source_policy) as project:
             self.stream_workflow(execute_workflow(
                 workflow, project,
                 project_name=ZIP_PROJECT if "project" in data else DEMO_PROJECT,
@@ -245,7 +247,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = scan_demo()
             elif self.path == "/api/scans":
                 data = self.read_upload({"project", "catalog"})
-                result = scan_upload(data.get("project"), data.get("catalog"))
+                result = scan_upload(data.get("project"), data.get("catalog"),
+                                     source_policy=self.server.workflows.source_policy)
             elif self.path == "/api/workflow":
                 self.run_workflow()
                 return
@@ -254,6 +257,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
         except RequestBodyError as exc:
             self.respond(exc.status, {"error": str(exc)})
+            return
+        except SourcePolicyError as exc:
+            code = HTTPStatus.FORBIDDEN if exc.code == "source-not-approved" else HTTPStatus.SERVICE_UNAVAILABLE
+            self.respond(code, {"code": exc.code, "error": str(exc)})
             return
         except InvalidInput as exc:
             self.respond(HTTPStatus.BAD_REQUEST, {"error": str(exc)})

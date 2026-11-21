@@ -9,11 +9,11 @@ from tempfile import TemporaryDirectory
 from zipfile import BadZipFile, ZipFile
 
 import scan
+from backend.source_policy import MAX_ARCHIVE, SourcePolicy
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DEMO = Path(__file__).resolve().parent / "demo"
-MAX_ARCHIVE = 8 * 1024 * 1024
 MAX_CATALOG = 512 * 1024
 MAX_UNCOMPRESSED = 64 * 1024 * 1024
 MAX_ENTRIES = 4000
@@ -87,12 +87,13 @@ def runtime_directory():
 
 
 @contextmanager
-def upload_project(archive, catalog_data):
+def upload_project(archive, catalog_data, *, source_policy=None):
     if not archive or len(archive) > MAX_ARCHIVE:
         raise InvalidInput("Нужен ZIP-архив размером до 8 МБ.")
     if catalog_data is not None and len(catalog_data) > MAX_CATALOG:
         raise InvalidInput("JSON-справочник должен быть меньше 512 КиБ.")
 
+    (source_policy or SourcePolicy()).require(archive)
     with TemporaryDirectory(prefix="scan-", dir=runtime_directory()) as workspace:
         work = Path(workspace)
         project = work / "project"
@@ -110,11 +111,11 @@ def upload_project(archive, catalog_data):
 
 
 @contextmanager
-def workflow_project(archive, catalog):
+def workflow_project(archive, catalog, *, source_policy=None):
     if archive is None:
         yield demo_project()
     else:
-        with upload_project(archive, catalog) as project:
+        with upload_project(archive, catalog, source_policy=source_policy) as project:
             yield project
 
 
@@ -122,6 +123,6 @@ def scan_demo():
     return scan.scan(*demo_project())
 
 
-def scan_upload(archive, catalog_data):
-    with upload_project(archive, catalog_data) as project:
+def scan_upload(archive, catalog_data, *, source_policy=None):
+    with upload_project(archive, catalog_data, source_policy=source_policy) as project:
         return scan.scan(*project)
