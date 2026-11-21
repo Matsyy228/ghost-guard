@@ -7,11 +7,14 @@ import subprocess
 import sys
 from collections import defaultdict, deque
 from dataclasses import dataclass
+from uuid import uuid4
 
 import scan
 from analyzers.common import submission_report
-from backend.llm import LLMError, explain_findings
+from backend.ai_summary import summarize
+from backend.llm import LLMError, analyze_findings
 from backend.service import InvalidInput
+from backend.webhook import DEMO_PROJECT, WebhookError, parse_url, report_payload, send_report
 
 
 MAX_GRAPH_BYTES = 16 * 1024
@@ -19,7 +22,7 @@ REPORT_UNREACHED = "workflow-report-unreached"
 REPORT_UNREACHED_MESSAGE = "На активном пути нет итогового отчёта. Подключите блок «Отчёт» к выбранной ветке."
 MAX_NODES = 24
 MAX_EDGES = 48
-NODE_TYPES = scan.SCANNERS | {"trigger", "condition", "llm", "report"}
+NODE_TYPES = scan.SCANNERS | {"trigger", "condition", "llm", "report", "webhook"}
 NODE_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}")
 SEVERITY_RANK = {level: rank for rank, level in enumerate(("low", "medium", "high", "critical"))}
 FIELDS = {"scanner", "severity", "file", "rule", "cve", "advisoryId", "package", "line"}
@@ -81,8 +84,22 @@ def parse_condition(config):
     return {"mode": mode, "field": field, "operator": comparison, "value": value}
 
 
+def parse_webhook(config):
+    url = config.get("url", "")
+    if url == "":
+        return {}
+    try:
+        if not isinstance(url, str):
+            raise ValueError
+        parse_url(url)
+    except ValueError:
+        raise InvalidInput("Укажите допустимый URL webhook без учётных данных и параметров.") from None
+    return {"url": url}
+
+
 def parse_nodes(raw_nodes):
     nodes = {}
+    parsers = {"condition": parse_condition, "webhook": parse_webhook}
     for raw in raw_nodes:
         if not isinstance(raw, dict):
             raise InvalidInput("Некорректный блок сценария.")
@@ -91,7 +108,7 @@ def parse_nodes(raw_nodes):
             raise InvalidInput("У каждого блока должен быть уникальный идентификатор.")
         if not isinstance(kind, str) or kind not in NODE_TYPES or not isinstance(config, dict):
             raise InvalidInput("Некорректный тип или параметры блока.")
-        nodes[node_id] = Node(node_id, kind, parse_condition(config) if kind == "condition" else {})
+        nodes[node_id] = Node(node_id, kind, parsers[kind](config) if kind in parsers else {})
     if sum(item.kind == "trigger" for item in nodes.values()) != 1:
         raise InvalidInput("В сценарии должен быть один блок ручного запуска.")
     if not any(item.kind == "report" for item in nodes.values()):
@@ -108,8 +125,11 @@ def parse_edges(raw_edges, nodes):
         source, target, branch = raw.get("source"), raw.get("target"), raw.get("branch")
         if not all(isinstance(item, str) and item in nodes for item in (source, target)):
             raise InvalidInput("Связь указывает на отсутствующий блок.")
-        if nodes[source].kind == "report" or nodes[target].kind == "trigger":
-            raise InvalidInput("У отчёта нет выхода, а у ручного запуска нет входа.")
+        source_kind, target_kind = nodes[source].kind, nodes[target].kind
+        if source_kind == "webhook" or target_kind == "trigger":
+            raise InvalidInput("У webhook нет выхода, а у ручного запуска нет входа.")
+        if (source_kind == "report") != (target_kind == "webhook"):
+            raise InvalidInput("Webhook принимает вход только от отчёта. Выход отчёта предназначен только для webhook.")
         allowed = ("true", "false") if nodes[source].kind == "condition" else (None,)
         if branch not in allowed:
             raise InvalidInput("Связь подключена к недопустимому выходу блока.")
@@ -198,26 +218,58 @@ def preview(findings):
     return [{key: item[key] for key in ("id", "scanner", "file", "line", "severity")} for item in findings[:10]]
 
 
-def execute_workflow(workflow, project):
+def webhook_node(node_id, delivery_status, *, status, **details):
+    return {"event": "node", "id": node_id, "status": status,
+            "delivery_status": delivery_status, **details}
+
+
+def deliver_webhook(node, payload):
+    url = node.config.get("url")
+    if not url:
+        yield webhook_node(node.id, "NOT_CONFIGURED", status="skipped", code="webhook-not-configured",
+                           message="URL webhook не настроен.")
+        return
+    yield webhook_node(node.id, "SENDING", status="running")
+    try:
+        http_status, attempts = send_report(url, payload)
+    except WebhookError as exc:
+        yield webhook_node(node.id, "FAILED", status="failed", code=exc.code, message=str(exc),
+                           output={"attempts": exc.attempts, "http_status": exc.http_status})
+    else:
+        yield webhook_node(node.id, "SENT", status="done",
+                           output={"attempts": attempts, "http_status": http_status})
+
+
+def execute_workflow(workflow, project, *, workflow_id=None, project_name=DEMO_PROJECT):
     order, incoming = workflow
     results, outputs, branches = {}, {}, {}
     explanation_outputs = {}
+    ai_outputs = {}
     report_types = set()
     reported_explanations = {}
+    reported_ai = {}
     report_nodes = []
+    pending_webhooks = []
     for item in order:
         node_id, kind = item.id, item.kind
         linked = [edge for edge in incoming[node_id] if edge.source in outputs and
                   (edge.branch is None or edge.branch == branches.get(edge.source))]
         if not linked and kind != "trigger":
-            yield {"event": "node", "id": node_id, "status": "skipped", "message": "Входная ветка не активна."}
+            delivery = {"delivery_status": "SKIPPED"} if kind == "webhook" else {}
+            yield {"event": "node", "id": node_id, "status": "skipped", "message": "Входная ветка не активна.", **delivery}
             continue
         types = frozenset().union(*(outputs[edge.source] for edge in linked))
         explanations = {}
+        ai_runs = {}
         for edge in linked:
             explanations.update(explanation_outputs[edge.source])
+            ai_runs.update(ai_outputs[edge.source])
         found = combined_report(types, results)["findings"]
         received = {"sources": [edge.source for edge in linked], "count": len(found), "findings": preview(found)}
+        if kind == "webhook":
+            pending_webhooks.append(item)
+            yield webhook_node(node_id, "PENDING", status="running", input=received)
+            continue
         yield {"event": "node", "id": node_id, "status": "running", "input": received}
         status, message, branch, matched = "done", "", None, None
         code = None
@@ -237,28 +289,37 @@ def execute_workflow(workflow, project):
                 branches[node_id] = branch
             elif kind == "llm":
                 try:
-                    for explanation in explain_findings(found):
+                    analysis = analyze_findings(found)
+                    for explanation in analysis.pop("explanations"):
                         explanations[explanation["finding_id"]] = explanation
+                    ai_runs[node_id] = analysis
                 except LLMError as exc:
                     code, message = exc.code, str(exc)
+                    ai_runs[node_id] = {"summary_code": code}
                     status = "skipped" if code in {"llm-not-configured", "llm-no-findings"} else "failed"
             elif kind == "report":
                 report_types.update(types)
                 reported_explanations.update(explanations)
+                reported_ai.update(ai_runs)
                 report_nodes.append(node_id)
         except (InvalidInput, OSError) as exc:
             message = str(exc) if isinstance(exc, InvalidInput) else "Не удалось прочитать файлы учебного проекта."
             yield {"event": "node", "id": node_id, "status": "failed", "message": message, "input": received}
+            for node in pending_webhooks:
+                yield webhook_node(node.id, "SKIPPED", status="skipped", message="Итоговый отчёт не сформирован.")
             yield {"event": "error", "error": message}
             return
 
         outputs[node_id] = types
         explanation_outputs[node_id] = explanations
+        ai_outputs[node_id] = ai_runs
         found = combined_report(types, results)["findings"]
         output = {"count": len(found), "findings": preview(found), "branch": branch,
                   "matched": preview([matched])[0] if matched is not None else None}
         if kind in {"llm", "report"}:
             output["explanations"] = list(explanations.values())
+        if kind == "llm":
+            output["ai"] = ai_runs[node_id]
         yield {
             "event": "node", "id": node_id, "status": status, "message": message, "input": received,
             "output": output, **({"code": code} if code else {}),
@@ -274,7 +335,18 @@ def execute_workflow(workflow, project):
     if reported_explanations:
         report["explanations"] = [reported_explanations[item["id"]] for item in report["findings"]
                                   if item["id"] in reported_explanations]
-    yield {
+    if reported_ai:
+        visible = {finding["id"]: reported_explanations[finding["id"]]
+                   for finding in report["findings"] if finding["id"] in reported_explanations}
+        report["ai_summary"] = summarize(report, gate, reported_ai, visible)
+    result = {
         "event": "result", "report": report, "reports": report_nodes, "branches": branches,
         "release_gate": gate, "submission": submission_report(report),
     }
+    if pending_webhooks:
+        ids = {"workflow_id": workflow_id or uuid4().hex, "run_id": uuid4().hex, "report_id": uuid4().hex}
+        payload = report_payload(report, gate, project_name=project_name, **ids)
+        result.update(ids)
+        for node in pending_webhooks:
+            yield from deliver_webhook(node, payload)
+    yield result

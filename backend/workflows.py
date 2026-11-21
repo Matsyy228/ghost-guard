@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from analyzers.common import submission_report
 from backend.service import InvalidInput, upload_project, workflow_project
+from backend.source_policy import SourcePolicy, SourcePolicyError
+from backend.webhook import DEMO_PROJECT, ZIP_PROJECT
 from backend.workflow import REPORT_UNREACHED, REPORT_UNREACHED_MESSAGE, compile_workflow, execute_workflow
 
 
@@ -68,7 +70,7 @@ def metadata(row):
     }
 
 
-def validate_save(data, archive, catalog):
+def validate_save(data, archive, catalog, source_policy):
     if not isinstance(data, dict):
         raise InvalidInput("Передайте параметры сценария в виде JSON-объекта.")
     name = data.get("name")
@@ -89,16 +91,26 @@ def validate_save(data, archive, catalog):
     if archive is None and catalog is not None:
         raise InvalidInput("Для загружаемого справочника нужен ZIP проекта.")
     if archive is not None:
-        with upload_project(archive, catalog):
+        with upload_project(archive, catalog, source_policy=source_policy):
             pass
     return name.strip(), graph.decode("utf-8")
 
 
 class WorkflowStore:
-    def __init__(self, path):
+    def __init__(self, path, *, source_policy=None):
         self.path = path
+        self.source_policy = source_policy or SourcePolicy()
         with self.connect() as db:
             db.executescript(SCHEMA)
+            db.execute("BEGIN IMMEDIATE")
+            if not any(column["name"] == "last_report" for column in db.execute("PRAGMA table_info(workflows)")):
+                db.execute("ALTER TABLE workflows ADD COLUMN last_report TEXT")
+                db.execute(
+                    """UPDATE workflows SET last_report = json_extract(run_events, '$[#-1]')
+                       WHERE CASE WHEN json_valid(run_events) THEN
+                           json_extract(run_events, '$[#-1].event') = 'result'
+                           AND json_type(run_events, '$[#-1].report') = 'object' END"""
+                )
             # Older servers marked a run successful when its only report was skipped.
             db.execute(
                 """UPDATE workflows SET run_status = 'failed',
@@ -130,9 +142,11 @@ class WorkflowStore:
         return {**metadata(row), "workflow": json.loads(row["graph"])}
 
     def save(self, data, archive=None, catalog=None, *, workflow_id=None):
-        name, graph = validate_save(data, archive, catalog)
+        name, graph = validate_save(data, archive, catalog, self.source_policy)
         now = time()
         with self.connect() as db:
+            if archive is not None:
+                self.source_policy.require(archive)
             if workflow_id is None:
                 workflow_id = uuid4().hex
                 db.execute(
@@ -140,6 +154,13 @@ class WorkflowStore:
                     (workflow_id, name, graph, now),
                 )
             else:
+                db.execute("BEGIN IMMEDIATE")
+                if archive is None and data.get("source") != "demo":
+                    existing = db.execute("SELECT archive FROM workflows WHERE id = ?", (workflow_id,)).fetchone()
+                    if existing is None:
+                        raise WorkflowNotFound
+                    if existing["archive"] is not None:
+                        self.source_policy.require(existing["archive"])
                 updated = db.execute(
                     "UPDATE workflows SET name = ?, graph = ?, updated_at = ? WHERE id = ?",
                     (name, graph, now, workflow_id),
@@ -161,7 +182,8 @@ class WorkflowStore:
     def last_run(self, workflow_id):
         with self.connect() as db:
             row = db.execute(
-                "SELECT run_status, run_trigger, run_started_at, run_finished_at, run_events FROM workflows WHERE id = ?",
+                """SELECT run_status, run_trigger, run_started_at, run_finished_at, run_events, last_report
+                   FROM workflows WHERE id = ?""",
                 (workflow_id,),
             ).fetchone()
         if row is None:
@@ -172,7 +194,13 @@ class WorkflowStore:
         events = json.loads(row["run_events"] or "[]")
         if events and events[-1].get("report") is not None and "submission" not in events[-1]:
             events[-1]["submission"] = submission_report(events[-1]["report"])
-        return {**status, "events": events}
+        result = {**status, "events": events}
+        if row["last_report"] is not None and (not events or events[-1].get("report") is None):
+            previous = json.loads(row["last_report"])
+            if "submission" not in previous:
+                previous["submission"] = submission_report(previous["report"])
+            result["last_report"] = previous
+        return result
 
     def claim(self, workflow_id=None):
         now = time()
@@ -194,13 +222,16 @@ class WorkflowStore:
 
     def finish(self, workflow_id, events, status):
         now = time()
+        terminal = events[-1]
+        report = json.dumps(terminal) if terminal["event"] == "result" and terminal.get("report") is not None else None
         with self.connect() as db:
             db.execute(
                 """UPDATE workflows SET run_status = ?, run_finished_at = ?, run_events = ?,
+                       last_report = COALESCE(?, last_report),
                        next_run_at = CASE WHEN run_trigger = 'schedule' AND next_run_at <= ?
                                           THEN ? + interval_seconds ELSE next_run_at END
                    WHERE id = ?""",
-                (status, now, json.dumps(events), now, now, workflow_id),
+                (status, now, json.dumps(events), report, now, now, workflow_id),
             )
 
     def recover_interrupted(self):
@@ -217,13 +248,18 @@ class WorkflowStore:
         terminal = {"event": "error", "error": "Сценарий завершился без результата."}
         try:
             workflow = compile_workflow(claimed["graph"].encode("utf-8"))
-            with workflow_project(claimed["archive"], claimed["catalog"]) as project:
-                for event in execute_workflow(workflow, project):
+            with workflow_project(claimed["archive"], claimed["catalog"], source_policy=self.source_policy) as project:
+                for event in execute_workflow(
+                    workflow, project, workflow_id=claimed["id"],
+                    project_name=ZIP_PROJECT if claimed["archive"] is not None else DEMO_PROJECT,
+                ):
                     if event["event"] in {"result", "error"}:
                         terminal = event
                         break
                     events.append(event)
                     yield event
+        except SourcePolicyError as exc:
+            terminal = {"event": "error", "code": exc.code, "error": str(exc)}
         except InvalidInput as exc:
             terminal = {"event": "error", "error": str(exc)}
         except Exception as exc:
