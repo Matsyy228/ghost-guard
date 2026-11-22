@@ -87,7 +87,7 @@ class AISummaryTests(unittest.TestCase):
         findings = [{**FINDING, "id": f"SCA-F{i:04}", "severity": "critical" if i == 24 else "medium"}
                     for i in range(25)]
 
-        def respond(*args):
+        def respond(*args, **kwargs):
             selection = list(args[-1])
             self.assertEqual(len(selection), MAX_FINDINGS)
             self.assertEqual(selection[0], "SCA-F0024")

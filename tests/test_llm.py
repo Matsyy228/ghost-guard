@@ -4,7 +4,7 @@ from io import BytesIO
 from urllib.error import URLError
 from unittest.mock import patch
 
-from backend.llm import LLMError, explain_findings
+from backend.llm import LLMError, analyze_findings, explain_findings
 from backend.service import demo_project
 from backend.workflow import compile_workflow, execute_workflow
 
@@ -54,7 +54,8 @@ class LLMTests(unittest.TestCase):
         endpoint = "http://127.0.0.1:8888/v1/chat/completions"
         with (patch.dict("os.environ", {}, clear=True), patch("backend.llm.build_opener") as opener,
               patch("backend.local_llm.LocalModel.config", return_value=(endpoint, "ghost-qwen", "local-key")) as local):
-            opener.return_value.open.side_effect = lambda *args, **kwargs: provider_response([EXPLANATION])
+            local_explanation = {key: EXPLANATION[key] for key in ("finding_id", "explanation")}
+            opener.return_value.open.side_effect = [provider_response([local_explanation]), provider_response([EXPLANATION])]
             explain_findings([FINDING], local_provider=local)
             request = opener.return_value.open.call_args.args[0]
             self.assertEqual(request.full_url, endpoint)
@@ -65,6 +66,70 @@ class LLMTests(unittest.TestCase):
             local.assert_called_once()
             self.assertEqual(opener.return_value.open.call_args.args[0].full_url,
                              "http://127.0.0.1:11434/v1/chat/completions")
+
+    def test_managed_request_is_compact_and_only_sends_masked_location(self):
+        canary = "SYNTHETIC_PRIVATE_VALUE"
+        finding = {**FINDING, "file": f"src/main/{canary}.kt", "source": canary,
+                   "recommendation": canary, "snippet": canary}
+        with (patch.dict("os.environ", {}, clear=True), patch("backend.llm.build_opener") as opener,
+              patch("backend.local_llm.LocalModel.config", return_value=("http://127.0.0.1:8888/v1/chat/completions",
+                                                                      "ghost-qwen", "")) as local):
+            opener.return_value.open.return_value = provider_response([{
+                "finding_id": FINDING["id"], "explanation": "Если используется функция, возможен эффект из бюллетеня.",
+            }])
+            result = explain_findings([finding], local_provider=local)
+        request = opener.return_value.open.call_args.args[0]
+        payload = json.loads(request.data)
+        metadata, = json.loads(payload["messages"][1]["content"])
+        self.assertEqual((metadata["path"], metadata["line"]), ("src/main/_", 7))
+        self.assertEqual(metadata["advisory_id"], FINDING["advisoryId"])
+        self.assertIn("бюллетене", metadata["risk"])
+        self.assertNotIn(canary, request.data.decode())
+        self.assertLess(payload["max_tokens"], 2200)
+        self.assertEqual(result[0]["file"], finding["file"])
+        self.assertEqual(set(result[0]), {"finding_id", "file", "line", "advisoryId", "explanation", "recommendation"})
+
+    def test_managed_risk_is_grounded_and_server_adds_repair_and_verification(self):
+        def provider():
+            return "http://127.0.0.1:8888/v1/chat/completions", "ghost-qwen", ""
+
+        def reply(request, **kwargs):
+            metadata, = json.loads(json.loads(request.data)["messages"][1]["content"])
+            explanation = {"finding_id": FINDING["id"], "explanation": risk or metadata["risk"]}
+            data = {"explanations": [explanation], "summary": {"priority_ids": [FINDING["id"]]}}
+            return BytesIO(json.dumps({"choices": [{"message": {"content": json.dumps(data)}}]}).encode())
+
+        for risk in (None, FINDING["title"], "Если библиотека загружена, возможна SQL-инъекция.",
+                     "Приложение использует затронутую функцию, возможны последствия из бюллетеня."):
+            with self.subTest(risk=risk), patch.dict("os.environ", {}, clear=True), patch("backend.llm.build_opener") as opener:
+                opener.return_value.open.side_effect = reply
+                result = analyze_findings([FINDING], local_provider=provider)
+                opener.return_value.open.assert_called_once()
+            public, = result["explanations"]
+            self.assertTrue(public["explanation"].startswith("Если приложение использует затронутую функцию"))
+            self.assertIn("Сверьте версию в графе Gradle", public["recommendation"])
+            self.assertNotIn("SQL", str(public))
+            self.assertEqual(result["summary_code"], "llm-guidance-fallback" if risk else None)
+
+    def test_managed_response_rejects_unknown_references_and_extra_fields(self):
+        def provider():
+            return "http://127.0.0.1:8888/v1/chat/completions", "ghost-qwen", ""
+
+        for extra in ({"finding_id": "SCA-F9999"}, {"explanation": "Затронута CWE."}, {"severity": "critical"},
+                      {"release_gate": "PASS"}, {"explanation": "Смотрите другую находку в fake.kt."}):
+            response = {"explanations": [{"finding_id": FINDING["id"], "explanation": "Текст модели.", **extra}]}
+            with self.subTest(extra=extra), patch.dict("os.environ", {}, clear=True), patch(
+                "backend.llm.call_provider", return_value=response,
+            ), self.assertRaises(LLMError):
+                analyze_findings([FINDING], local_provider=provider)
+
+    def test_managed_unrecognized_rule_does_not_generate_unverified_guidance(self):
+        finding = {**FINDING, "id": "SAST-F0001", "scanner": "sast", "rule": "unrecognized-rule"}
+        with (patch.dict("os.environ", {}, clear=True), patch("backend.local_llm.LocalModel.config") as local,
+              self.assertRaises(LLMError) as error):
+            analyze_findings([finding], local_provider=local)
+        self.assertEqual(error.exception.code, "llm-no-findings")
+        local.assert_not_called()
 
     def test_rejects_wrong_ids_advisories_and_locations(self):
         invalid = [
