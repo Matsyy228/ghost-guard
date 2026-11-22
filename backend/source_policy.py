@@ -9,6 +9,8 @@ from stat import S_ISDIR, S_ISREG
 from zipfile import is_zipfile
 
 
+DEMO_ACCEPT_NEW_ZIPS = False
+
 MAX_ARCHIVE = 8 * 1024 * 1024
 DEFAULT_APPROVALS = Path(__file__).resolve().parents[1] / ".runtime" / "approved-sources"
 
@@ -40,6 +42,8 @@ class SourcePolicy:
         return self.directory / digest
 
     def require(self, archive):
+        if DEMO_ACCEPT_NEW_ZIPS:
+            return
         try:
             marker = self.marker(sha256(archive).hexdigest())
             entry = marker.lstat()

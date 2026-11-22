@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import SpotlightCard from "@/components/react-bits/SpotlightCard";
+import SpotlightCard from "./components/react-bits/SpotlightCard";
 
 const title = document.getElementById("page-title");
 const demo = document.getElementById("demo-input");
