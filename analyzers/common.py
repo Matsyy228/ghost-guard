@@ -3,6 +3,7 @@
 import re
 from bisect import bisect_right
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 
 IDENTIFIER = r"[A-Za-z_]\w*"
@@ -83,12 +84,40 @@ def finding(scanner, rule, severity, file, line, title, recommendation, **detail
     }
 
 
-def submission_report(report):
+def _submission_wrapper(root):
+    if root is None:
+        return None
+    entries = list(root.iterdir())
+    if len(entries) != 1:
+        return None
+    directory = entries[0]
+    if not directory.is_dir() or directory.name in {"src", "gradle"}:
+        return None
+    # Strip an enclosing ZIP folder only when it contains a recognizable project root.
+    if (directory / "src").is_dir() or any(
+        (directory / marker).is_file() for marker in ("build.gradle.kts", "settings.gradle.kts")
+    ):
+        return directory.name
+    return None
+
+
+def _submission_path(value, wrapper):
+    path = PurePosixPath(value.replace("\\", "/"))
+    if path.is_absolute() or not path.parts or ".." in path.parts or ":" in value:
+        raise ValueError("Путь находки должен быть относительным путём проекта.")
+    if wrapper is not None and len(path.parts) > 1 and path.parts[0] == wrapper:
+        path = path.relative_to(wrapper)
+    return path.as_posix()
+
+
+def submission_report(report, *, scan_root=None):
+    wrapper = _submission_wrapper(scan_root)
     findings = []
     for item in report["findings"]:
         category = "SECRET" if item["scanner"] == "secrets" else item["scanner"].upper()
         entry = {
-            "category": category, "path": item["file"], "severity": item["severity"].upper(),
+            "category": category, "path": _submission_path(item["file"], wrapper),
+            "severity": item["severity"].upper(),
             "description": item["title"], "remediation": item["recommendation"],
         }
         if category == "SCA":

@@ -5,6 +5,7 @@ import json
 import os
 import re
 from collections import Counter
+from contextlib import nullcontext
 from pathlib import Path
 
 from analyzers.common import Kotlin, finding, submission_report
@@ -158,7 +159,7 @@ def release_gate(report, scanners=SCANNERS):
 
 
 def main():
-    from backend.service import DEMO, MAX_CATALOG, scan_upload
+    from backend.service import DEMO, MAX_CATALOG, upload_project
     from backend.source_policy import read_local_archive
 
     parser = argparse.ArgumentParser(description=__doc__)
@@ -172,7 +173,7 @@ def main():
             raise ValueError("remote project sources are not supported")
         local = Path(args.project)
         if local.absolute() == DEMO / "project":
-            report = scan(local.resolve(), load_catalog(args.catalog))
+            project = nullcontext((local.resolve(), load_catalog(args.catalog)))
         else:
             if local.is_dir():
                 raise ValueError("pack the local training project as ZIP and approve it with python -m backend.source_policy")
@@ -181,12 +182,15 @@ def main():
             if args.catalog is not None:
                 with args.catalog.open("rb") as stream:
                     catalog = stream.read(MAX_CATALOG + 1)
-            report = scan_upload(archive, catalog)
+            project = upload_project(archive, catalog)
+        with project as (root, catalog):
+            report = scan(root, catalog)
+            output = submission_report(report, scan_root=root) if args.submission else report
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     if args.release_gate:
         report["release_gate"] = release_gate(report)
-    print(json.dumps(submission_report(report) if args.submission else report, indent=2))
+    print(json.dumps(output, indent=2))
     if args.release_gate and report["release_gate"]["status"] == "BLOCK":
         return 1
     return 0

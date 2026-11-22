@@ -195,6 +195,7 @@ function render(animate = false) {
   renderOverview();
   renderFeedback();
   renderFindings(ui, state.result?.report, { phase: state.phase, context: state.reportContext, animate });
+  ui.download.disabled = !Array.isArray(downloadableReport()?.findings);
 }
 
 function setRunStatus(text, status = "idle") {
@@ -294,15 +295,20 @@ function openOfflineReport() {
   navigate("#report");
 }
 
+function downloadableReport() {
+  return state.phase === "snapshot" ? state.result?.report : state.result?.submission;
+}
+
 function downloadReport() {
-  if (!state.result?.report) return;
-  const url = URL.createObjectURL(new Blob([JSON.stringify(state.result.report, null, 2)], { type: "application/json" }));
+  const report = downloadableReport();
+  if (!Array.isArray(report?.findings)) return;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: "application/json;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
   link.download = {
     snapshot: "ghost-guard-demo-report.json",
-    stale: "security-report-previous.json",
-  }[state.phase] ?? "security-report.json";
+    stale: "findings-previous.json",
+  }[state.phase] ?? "findings.json";
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

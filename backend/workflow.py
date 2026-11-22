@@ -351,7 +351,7 @@ def execute_workflow(workflow, project, *, local_provider=None, workflow_id=None
         report["ai_summary"] = summarize(report, gate, reported_ai, visible)
     result = {
         "event": "result", "report": report, "reports": report_nodes, "branches": branches,
-        "release_gate": gate, "submission": submission_report(report),
+        "release_gate": gate, "submission": submission_report(report, scan_root=project[0]),
     }
     if pending_webhooks:
         ids = {"workflow_id": workflow_id or uuid4().hex, "run_id": uuid4().hex, "report_id": uuid4().hex}
