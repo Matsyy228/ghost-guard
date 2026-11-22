@@ -167,6 +167,10 @@ button:disabled, select:disabled, input:disabled { cursor: default; opacity: .58
 .graph-config { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; margin: 7px 0; }
 .graph-config label { display: grid; gap: 3px; color: var(--muted); font-size: .78rem; min-width: 0; }
 .graph-config input, .graph-config select { width: 100%; min-width: 0; }
+.saved-form { padding: 8px 16px; }
+.saved-form p { grid-column: 1 / -1; margin: 0; color: var(--muted); }
+.saved-form p:empty { display: none; }
+#run-events { padding-inline-start: 24px; }
 .webhook-config { grid-template-columns: minmax(0, 1fr); }
 .graph-links { display: grid; gap: 2px; margin: 5px 0; padding: 0; list-style: none; }
 .graph-links li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

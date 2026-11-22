@@ -105,6 +105,39 @@ class WorkflowApiTests(unittest.TestCase):
         self.assertEqual(updated["source"], "demo")
         self.assertFalse(updated["has_catalog"])
 
+    def test_conditions_route_findings_after_json_roundtrip(self):
+        workflow = graph("trigger", "secrets", "condition")
+        for branch in ("true", "false"):
+            workflow["nodes"].append({"id": branch, "type": "report"})
+            workflow["edges"].append({"source": "condition", "target": branch, "branch": branch})
+        cases = (
+            ({"mode": "severity", "value": "high"}, "true"),
+            ({"mode": "severity", "value": "critical"}, "false"),
+            ({"mode": "compare", "field": "line", "operator": "gte", "value": "1"}, "true"),
+            ({"mode": "compare", "field": "line", "operator": "gt", "value": "9999"}, "false"),
+            ({"mode": "compare", "field": "rule", "operator": "eq", "value": "password"}, "true"),
+            ({"mode": "compare", "field": "rule", "operator": "eq", "value": "api-key"}, "false"),
+            ({"mode": "regex", "field": "file", "value": r"application-.*\.yml$"}, "true"),
+            ({"mode": "regex", "field": "file", "value": r"^missing/"}, "false"),
+        )
+        for condition, branch in cases:
+            with self.subTest(condition=condition):
+                workflow["nodes"][2]["config"] = condition
+                saved = self.request("POST", "/api/workflows", {"name": "Condition", "workflow": workflow}, expected=201)
+                path = f"/api/workflows/{saved['id']}"
+                restored = self.request("GET", path)
+                self.assertEqual(restored["workflow"], workflow)
+                events = self.request("POST", path + "/run", b"")
+                result = events[-1]
+                self.assertEqual(result["branches"], {"condition": branch})
+                self.assertEqual(result["reports"], [branch])
+                node = next(event for event in events if event.get("id") == "condition" and event["status"] == "done")
+                self.assertEqual(node["input"]["sources"], ["secrets"])
+                self.assertEqual(node["input"]["findings"], node["output"]["findings"])
+                self.assertEqual(len(result["submission"]["findings"]), 1)
+                self.assertEqual(result["release_gate"]["status"], "BLOCK")
+                self.assertEqual(self.request("GET", path + "/last-run")["last_run"]["events"], events)
+
     def test_schedule_runs_without_a_client_and_can_be_disabled(self):
         saved = self.request("POST", "/api/workflows", {**self.settings, "interval_seconds": 1}, expected=201)
         path = f"/api/workflows/{saved['id']}"

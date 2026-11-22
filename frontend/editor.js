@@ -2,7 +2,7 @@ import { deliveryDetails, deliveryLabels } from "./webhook.js";
 
 const typeNames = {
   trigger: "Ручной запуск", secrets: "Secrets", sca: "SCA", sast: "SAST",
-  llm: "Объяснение LLM", condition: "Условие", report: "Отчёт", webhook: "Webhook",
+  llm: "Объяснение LLM", condition: "Условие", report: "Отчёт", webhook: "Webhook", telegram: "Telegram",
 };
 const statusNames = {
   idle: "Ожидает", running: "Выполняется", done: "Выполнено", skipped: "Пропущено", failed: "Ошибка",
@@ -201,6 +201,14 @@ export function createEditor(ui, onEdit) {
     }
     if (graph.edges.some((edge) => edge.target === target && edge.source === pending.source && edge.branch === pending.branch)) {
       setHint("Такая связь уже есть.");
+      return;
+    }
+    const reachable = new Set([target]);
+    for (const id of reachable) {
+      for (const edge of graph.edges) if (edge.source === id) reachable.add(edge.target);
+    }
+    if (reachable.has(pending.source)) {
+      setHint("Связь замыкает цикл.");
       return;
     }
     graph.edges.push({ ...pending, target });
@@ -493,6 +501,7 @@ export function createEditor(ui, onEdit) {
       return;
     }
     const type = ui["node-type"].value;
+    while (find(`block-${nextId}`)) nextId++;
     const count = nextId++;
     const index = graph.nodes.filter((item) => item.id.startsWith("block-")).length;
     const spacing = Math.max(156, Math.floor((stage.offsetWidth - 32 - WIDTH) / 5));
@@ -525,13 +534,44 @@ export function createEditor(ui, onEdit) {
       paintCards();
       renderData();
     },
-    payload: () => ({ nodes: graph.nodes.map(({ id, type, config }) => ({ id, type, config })), edges: graph.edges }),
-    setBusy(value) {
+    payload: () => structuredClone(graph),
+    load(saved) {
+      if (!Array.isArray(saved?.nodes) || !Array.isArray(saved.edges) ||
+          !saved.nodes.length || saved.nodes.length > 24 || saved.edges.length > 48) {
+        throw new Error("Ожидается JSON графа с блоками и связями.");
+      }
+      const ids = new Set();
+      for (const node of saved.nodes) {
+        if (!node || typeof node.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$/.test(node.id)
+            || ids.has(node.id) || !Object.hasOwn(typeNames, node.type)
+            || (node.config != null && (typeof node.config !== "object" || Array.isArray(node.config)))) {
+          throw new Error("JSON содержит некорректный блок.");
+        }
+        ids.add(node.id);
+      }
+      if (saved.edges.some((edge) => !edge || !ids.has(edge.source) || !ids.has(edge.target)
+          || ![null, undefined, "true", "false"].includes(edge.branch))) {
+        throw new Error("JSON содержит некорректную связь.");
+      }
+      graph = structuredClone(saved);
+      for (const [index, node] of graph.nodes.entries()) {
+        node.x = Number.isFinite(node.x) ? Math.min(5000, Math.max(0, node.x)) : 16 + (index % 6) * 156;
+        node.y = Number.isFinite(node.y) ? Math.min(5000, Math.max(0, node.y)) : 48 + Math.floor(index / 6) * 108;
+        if (node.type === "condition") node.config ??= { mode: "severity", value: "high" };
+        if (node.type === "webhook") node.config ??= { url: "" };
+      }
+      selected = graph.nodes.find((node) => node.type === "condition")?.id ?? graph.nodes[0].id;
+      pending = null;
+      nextId = 1;
+      edit();
+      viewport.scrollTo(0, 0);
+    },
+    setBusy(value, reset = true) {
       busy = value;
       ui["node-type"].disabled = value;
       ui["add-node"].disabled = value;
       ui["reset-graph"].disabled = value;
-      if (value) {
+      if (value && reset) {
         pending = null;
         events.clear();
         setHint();

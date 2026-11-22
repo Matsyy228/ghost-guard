@@ -85,6 +85,25 @@
         </form>
       </section>
 
+      <section class="panel" aria-labelledby="saved-title">
+        <header class="panel-header"><h2 id="saved-title">Сохранённые сценарии</h2></header>
+        <form id="saved-form" class="saved-form graph-config">
+          <label>Сценарий<select id="saved-list"><option value="">Новый сценарий</option></select></label>
+          <label>Имя<input id="saved-name" value="Моя проверка" required maxlength="80"></label>
+          <label>Интервал, секунды<input id="saved-interval" type="number" min="1" max="86400" step="1" placeholder="Выключено"></label>
+          <div class="report-actions">
+            <button id="saved-open" type="button" class="secondary">Открыть</button>
+            <button id="saved-submit" type="submit" class="secondary">Сохранить</button>
+            <button id="saved-last" type="button" class="secondary" disabled>Последний запуск</button>
+            <button id="graph-export" type="button" class="secondary">Скачать граф</button>
+            <button id="graph-import" type="button" class="secondary">Загрузить граф</button>
+            <input id="graph-file" type="file" accept=".json,application/json" hidden>
+          </div>
+          <p id="saved-status" role="status"></p>
+          <p id="saved-live" role="status"></p>
+        </form>
+      </section>
+
       <section class="panel workflow" id="workflow" aria-labelledby="workflow-title">
         <header class="panel-header">
           <div><h2 id="workflow-title" tabindex="-1">Сценарий проверки</h2><p>Настройте блоки и проверьте, куда ведёт каждая ветка.</p></div>
@@ -128,6 +147,10 @@
           </section>
         </div>
         <p id="workflow-note" class="workflow-note" role="status">Выберите источник и запустите сценарий.</p>
+        <details id="run-journal" class="workflow-note" hidden>
+          <summary>Журнал выполнения</summary>
+          <ol id="run-events"></ol>
+        </details>
       </section>
 
       <section class="panel report" id="report" aria-labelledby="report-title">

@@ -56,11 +56,21 @@ async function readWorkflow(response, onNode) {
   return result;
 }
 
-export async function runWorkflow(body, onNode) {
+export async function workflowRequest(path = "", options = {}) {
+  const response = await fetch(`${API}/workflows${path}`, {
+    ...options, signal: AbortSignal.timeout(15000), cache: "no-store",
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `Запрос завершился с HTTP ${response.status}.`);
+  return data;
+}
+
+export async function runWorkflow(body, onNode, savedId) {
   const timeoutSeconds = 120;
   const signal = AbortSignal.timeout(timeoutSeconds * 1000);
   try {
-    const response = await fetch(`${API}/workflow`, { method: "POST", body, signal });
+    const path = savedId ? `/workflows/${savedId}/run` : "/workflow";
+    const response = await fetch(`${API}${path}`, { method: "POST", body, signal });
     if (!response.ok) {
       const data = await response.json().catch(() => null);
       throw new Error(data?.error || `Сервер вернул HTTP ${response.status}. Повторите проверку.`);
