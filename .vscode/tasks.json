@@ -30,25 +30,19 @@
     {
       "label": "Start frontend",
       "dependsOn": "Verify backend build",
-      "type": "process",
-      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
-      "args": ["-B", "-u", "-m", "http.server", "5173", "--bind", "127.0.0.1", "--directory", "frontend"],
-      "options": { "cwd": "${workspaceFolder}" },
+      "type": "shell",
+      "command": "pnpm.cmd",
+      "args": ["run", "dev"],
+      "options": { "cwd": "${workspaceFolder}/frontend" },
       "presentation": { "reveal": "always", "panel": "dedicated", "group": "workflow" },
       "isBackground": true,
       "problemMatcher": {
-        "owner": "python-http-server",
-        "fileLocation": "absolute",
-        "pattern": {
-          "regexp": "^\\s*File \"(.+)\", line (\\d+)(.*)$",
-          "file": 1,
-          "line": 2,
-          "message": 3
-        },
+        "owner": "vite",
+        "pattern": { "regexp": "^(.+):(\\d+): (.+)$", "file": 1, "line": 2, "message": 3 },
         "background": {
           "activeOnStart": true,
-          "beginsPattern": "^Serving HTTP on ",
-          "endsPattern": "^Serving HTTP on 127\\.0\\.0\\.1 port 5173 "
+          "beginsPattern": "^.*VITE v.*ready in",
+          "endsPattern": "^.*Local:.*http://127\\.0\\.0\\.1:5173/"
         }
       }
     },

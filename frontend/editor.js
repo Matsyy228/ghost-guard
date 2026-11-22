@@ -1,6 +1,8 @@
+import { deliveryDetails, deliveryLabels } from "./webhook.js";
+
 const typeNames = {
   trigger: "Ручной запуск", secrets: "Secrets", sca: "SCA", sast: "SAST",
-  condition: "Условие", report: "Отчёт",
+  llm: "Объяснение LLM", condition: "Условие", report: "Отчёт", webhook: "Webhook",
 };
 const statusNames = {
   idle: "Ожидает", running: "Выполняется", done: "Выполнено", skipped: "Пропущено", failed: "Ошибка",
@@ -15,9 +17,10 @@ const fieldOptions = [
 const modes = [["severity", "Порог критичности"], ["compare", "Сравнение"], ["regex", "Регулярное выражение"]];
 const operators = [["eq", "Равно"], ["ne", "Не равно"], ["gt", "Больше"], ["gte", "Не меньше"], ["lt", "Меньше"], ["lte", "Не больше"]];
 const branchNames = { true: "Да", false: "Нет" };
-const WIDTH = 122;
+const WIDTH = 132;
 const HEIGHT = 86;
 const LINK_HINT = "Для связи нажмите выход блока, затем вход другого блока.";
+const arrowSteps = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 
 function element(tag, text = "", className = "") {
   const item = document.createElement(tag);
@@ -26,33 +29,39 @@ function element(tag, text = "", className = "") {
   return item;
 }
 
-function template() {
-  const nodes = ["trigger", "secrets", "sca", "sast", "condition"].map((type, index) => ({
-    id: type, type, x: 16 + index * 140, y: 115,
+function template(width = 960) {
+  const chain = ["trigger", "secrets", "sca", "sast", "llm", "condition"];
+  const spacing = Math.max(156, Math.floor((width - 32 - WIDTH) / chain.length));
+  const nodes = chain.map((type, index) => ({
+    id: type, type, x: 16 + index * spacing, y: 115,
   }));
   nodes.at(-1).config = { mode: "severity", value: "high" };
-  nodes.push({ id: "risk-report", type: "report", label: "Отчёт о рисках", x: 716, y: 48 },
-    { id: "low-report", type: "report", label: "Ниже порога", x: 716, y: 182 });
-  const edges = nodes.slice(1, 5).map((item, index) => ({ source: nodes[index].id, target: item.id, branch: null }));
+  const reportX = 16 + chain.length * spacing;
+  nodes.push({ id: "risk-report", type: "report", label: "Отчёт о рисках", x: reportX, y: 48 },
+    { id: "low-report", type: "report", label: "Ниже порога", x: reportX, y: 182 });
+  const edges = chain.slice(1).map((target, index) => ({ source: chain[index], target, branch: null }));
   edges.push({ source: "condition", target: "risk-report", branch: "true" },
     { source: "condition", target: "low-report", branch: "false" });
   return { nodes, edges };
 }
 
 export function createEditor(ui, onEdit) {
-  let graph = template();
+  const stage = ui["graph-stage"];
+  const canvas = ui["graph-lines"];
+  const nodeLayer = ui["graph-nodes"];
+  const viewport = ui["graph-viewport"];
+  const nodePicker = ui["jump-node"];
+  const settings = ui["node-settings"];
+  const dataView = ui["node-data"];
+  const hint = ui["graph-hint"];
+  let graph = template(ui["graph-viewport"].clientWidth || 960);
   let selected = "condition";
   let nextId = 1;
   let pending = null;
   let busy = false;
+  let autoLayout = true;
   const events = new Map();
   const cards = new Map();
-  const stage = ui["graph-stage"];
-  const canvas = ui["graph-lines"];
-  const nodeLayer = ui["graph-nodes"];
-  const settings = ui["node-settings"];
-  const dataView = ui["node-data"];
-  const hint = ui["graph-hint"];
   const find = (id) => graph.nodes.find((item) => item.id === id);
   const name = (id) => {
     const item = find(id);
@@ -82,7 +91,7 @@ export function createEditor(ui, onEdit) {
       const reached = events.get(edge.target)?.input?.sources.includes(edge.source);
       const active = reached && (!edge.branch || picked === edge.branch);
       context.lineWidth = active ? 2.8 : 1.6;
-      context.strokeStyle = active ? (edge.branch === "false" ? "#f1c675" : "#69e6c0") : "#486381";
+      context.strokeStyle = active ? "#62d6b0" : "#526873";
       context.setLineDash(picked && edge.branch && picked !== edge.branch ? [4, 4] : []);
       context.beginPath();
       context.moveTo(beginX, beginY);
@@ -96,17 +105,42 @@ export function createEditor(ui, onEdit) {
     card.style.top = `${item.y}px`;
   }
 
+  function resizeStage() {
+    const availableWidth = viewport.clientWidth;
+    if (autoLayout) {
+      const positions = new Map(template(availableWidth || 960).nodes.map(({ id, x, y }) => [id, { x, y }]));
+      for (const item of graph.nodes) {
+        const layout = positions.get(item.id);
+        if (layout) Object.assign(item, layout);
+      }
+    }
+    const contentWidth = Math.max(...graph.nodes.map((item) => item.x + WIDTH + 16));
+    const contentHeight = Math.max(...graph.nodes.map((item) => item.y + HEIGHT + 20));
+    const targetHeight = Math.min(390, Math.max(300, Math.round(window.innerHeight * 0.37)));
+    stage.style.width = `${Math.max(availableWidth, contentWidth)}px`;
+    stage.style.height = `${Math.max(targetHeight, contentHeight)}px`;
+    if (autoLayout) {
+      for (const item of graph.nodes) {
+        const card = cards.get(item.id);
+        if (card) position(item, card);
+      }
+    }
+    draw();
+  }
+
   function setHint(message = LINK_HINT) {
     hint.textContent = message;
   }
 
   function paintCards() {
+    nodePicker.value = selected;
     for (const [id, card] of cards) {
       const status = events.get(id)?.status ?? "idle";
       card.dataset.status = status;
       card.dataset.selected = String(id === selected);
       card.querySelector(".graph-handle").setAttribute("aria-pressed", String(id === selected));
-      card.querySelector(".graph-badge").textContent = statusNames[status];
+      card.querySelector(".graph-badge").textContent =
+        deliveryLabels[events.get(id)?.delivery_status] ?? statusNames[status];
       for (const port of card.querySelectorAll(".graph-port")) {
         port.disabled = busy;
         if (port.classList.contains("out")) {
@@ -117,7 +151,9 @@ export function createEditor(ui, onEdit) {
     draw();
   }
 
-  function edit({ rebuild = true, message = LINK_HINT } = {}) {
+  function edit({ rebuild = true, message = LINK_HINT, resetLayout = false } = {}) {
+    if (resetLayout) autoLayout = true;
+    else if (rebuild) autoLayout = false;
     events.clear();
     setHint(message);
     if (rebuild) renderNodes();
@@ -135,6 +171,16 @@ export function createEditor(ui, onEdit) {
     renderData();
   }
 
+  nodePicker.addEventListener("change", () => {
+    const card = cards.get(nodePicker.value);
+    if (!card) return;
+    choose(nodePicker.value);
+    viewport.scrollTo({
+      left: card.offsetLeft - (viewport.clientWidth - card.offsetWidth) / 2,
+      top: card.offsetTop - (viewport.clientHeight - card.offsetHeight) / 2,
+    });
+  });
+
   function connect(target) {
     if (!pending) {
       choose(target);
@@ -143,6 +189,10 @@ export function createEditor(ui, onEdit) {
     }
     if (pending.source === target) {
       setHint("Выберите вход другого блока.");
+      return;
+    }
+    if ((find(pending.source).type === "report") !== (find(target).type === "webhook")) {
+      setHint("Webhook подключается только к выходу блока «Отчёт».");
       return;
     }
     if (graph.edges.length >= 48) {
@@ -157,6 +207,7 @@ export function createEditor(ui, onEdit) {
     selected = pending.source;
     pending = null;
     edit({ message: `Связь добавлена: ${name(selected)} → ${name(target)}.` });
+    cards.get(target).querySelector(".graph-handle").focus();
   }
 
   function port(item, side, branch = null) {
@@ -187,6 +238,22 @@ export function createEditor(ui, onEdit) {
     handle.type = "button";
     handle.append(element("strong", name(item.id)), element("span", "", "graph-badge"));
     handle.addEventListener("click", () => choose(item.id));
+    function move(x, y) {
+      autoLayout = false;
+      item.x = Math.round(Math.max(12, Math.min(stage.offsetWidth - WIDTH - 12, x)));
+      item.y = Math.round(Math.max(12, Math.min(stage.offsetHeight - HEIGHT - 12, y)));
+      position(item, card);
+      draw();
+    }
+    handle.addEventListener("keydown", (event) => {
+      const step = arrowSteps[event.key];
+      if (!step || busy || event.ctrlKey || event.altKey || event.metaKey) return;
+      event.preventDefault();
+      if (selected !== item.id) choose(item.id);
+      const distance = event.shiftKey ? 32 : 8;
+      move(item.x + step[0] * distance, item.y + step[1] * distance);
+      handle.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
     let start;
     handle.addEventListener("pointerdown", (event) => {
       if (busy || event.button !== 0) return;
@@ -195,25 +262,27 @@ export function createEditor(ui, onEdit) {
     });
     handle.addEventListener("pointermove", (event) => {
       if (!start || start.pointer !== event.pointerId) return;
-      item.x = Math.round(Math.max(12, Math.min(stage.offsetWidth - WIDTH - 12, start.left + event.clientX - start.x)));
-      item.y = Math.round(Math.max(12, Math.min(stage.offsetHeight - HEIGHT - 12, start.top + event.clientY - start.y)));
-      position(item, card);
-      draw();
+      move(start.left + event.clientX - start.x, start.top + event.clientY - start.y);
     });
     handle.addEventListener("lostpointercapture", () => { start = null; });
     card.append(handle);
     if (item.type !== "trigger") card.append(port(item, "in"));
     if (item.type === "condition") card.append(port(item, "out", "true"), port(item, "out", "false"));
-    else if (item.type !== "report") card.append(port(item, "out"));
+    else if (item.type !== "webhook") card.append(port(item, "out"));
     position(item, card);
     return card;
   }
 
   function renderNodes() {
-    stage.style.height = `${Math.max(316, ...graph.nodes.map((item) => item.y + HEIGHT + 20))}px`;
+    resizeStage();
     cards.clear();
     for (const item of graph.nodes) cards.set(item.id, makeCard(item));
     nodeLayer.replaceChildren(...cards.values());
+    nodePicker.replaceChildren(...graph.nodes.map((item) => {
+      const option = element("option", name(item.id));
+      option.value = item.id;
+      return option;
+    }));
     paintCards();
     renderSettings();
     renderData();
@@ -273,9 +342,9 @@ export function createEditor(ui, onEdit) {
   function remove(id) {
     const incoming = graph.edges.filter((edge) => edge.target === id);
     const outgoing = graph.edges.filter((edge) => edge.source === id);
-    const wasScanner = ["secrets", "sca", "sast"].includes(find(id).type);
+    const canReconnect = ["secrets", "sca", "sast", "llm"].includes(find(id).type);
     graph.edges = graph.edges.filter((edge) => edge.source !== id && edge.target !== id);
-    if (wasScanner && incoming.length === 1 && outgoing.length === 1) {
+    if (canReconnect && incoming.length === 1 && outgoing.length === 1) {
       const bridge = { ...incoming[0], target: outgoing[0].target };
       if (bridge.source !== bridge.target && !graph.edges.some((edge) => edge.source === bridge.source && edge.target === bridge.target && edge.branch === bridge.branch)) {
         graph.edges.push(bridge);
@@ -285,12 +354,33 @@ export function createEditor(ui, onEdit) {
     selected = graph.nodes.find((item) => item.type === "condition")?.id ?? graph.nodes[0].id;
     pending = null;
     edit();
+    cards.get(selected).querySelector(".graph-handle").focus();
   }
 
   function renderSettings() {
     const item = find(selected);
     settings.replaceChildren(element("p", name(item.id)));
     if (item.type === "condition") settings.append(conditionSettings(item));
+    if (item.type === "llm") {
+      settings.append(element("p", "Объясняет входные находки. Адрес провайдера, модель и ключ задаются в окружении backend."));
+    }
+    if (item.type === "webhook") {
+      const form = element("div", "", "graph-config webhook-config");
+      const label = element("label", "URL получателя");
+      const input = element("input");
+      input.type = "url";
+      input.maxLength = 512;
+      input.placeholder = "http://127.0.0.1:8765/webhook";
+      input.value = item.config.url;
+      input.disabled = busy;
+      input.addEventListener("input", () => {
+        item.config.url = input.value.trim();
+        edit({ rebuild: false });
+      });
+      label.append(input);
+      form.append(label);
+      settings.append(form, element("p", "Подключите выход отчёта. Получатель должен быть разрешён на сервере."));
+    }
     const list = element("ul", "", "graph-links");
     const outgoing = graph.edges.filter((edge) => edge.source === item.id);
     for (const edge of outgoing) {
@@ -304,6 +394,7 @@ export function createEditor(ui, onEdit) {
         graph.edges = graph.edges.filter((link) => link !== edge);
         pending = null;
         edit();
+        cards.get(selected).querySelector(".graph-handle").focus();
       });
       row.append(unlink);
       list.append(row);
@@ -321,7 +412,41 @@ export function createEditor(ui, onEdit) {
   function dataList(data) {
     const list = element("ul", "", "graph-data-list");
     for (const finding of data.findings) {
-      list.append(element("li", `${finding.scanner} · ${finding.file}:${finding.line} · ${finding.severity}`));
+      const details = [finding.id, finding.scanner, finding.rule, `${finding.file}:${finding.line}`, finding.severity]
+        .filter((value) => typeof value === "string" && value.length);
+      const item = element("li", details.join(" · "));
+      const explanation = explanationElement(finding.llm_explanation);
+      if (explanation) item.append(explanation);
+      list.append(item);
+    }
+    return list;
+  }
+
+  function explanationElement(explanation) {
+    if (!explanation || typeof explanation !== "object" || Array.isArray(explanation)) return null;
+    const summary = typeof explanation.explanation === "string" ? explanation.explanation.trim()
+      : typeof explanation.summary === "string" ? explanation.summary.trim() : "";
+    const recommendation = typeof explanation.recommendation === "string" ? explanation.recommendation.trim() : "";
+    if (!summary && !recommendation) return null;
+
+    const section = element("section", "", "finding-llm");
+    section.append(element("strong", "Интерпретация модели"));
+    if (summary) section.append(element("p", `Почему: ${summary}`));
+    if (recommendation) section.append(element("p", `Совет модели. ${recommendation}`));
+    return section;
+  }
+
+  function explanationList(explanations) {
+    const list = element("ul", "", "graph-data-list");
+    for (const explanation of explanations) {
+      const location = explanation.file && Number.isInteger(explanation.line)
+        ? `${explanation.file}:${explanation.line}` : "";
+      const details = [explanation.finding_id, location, explanation.advisoryId]
+        .filter((value) => typeof value === "string" && value.length);
+      const item = element("li", details.join(" · "));
+      const rendered = explanationElement(explanation);
+      if (rendered) item.append(rendered);
+      list.append(item);
     }
     return list;
   }
@@ -332,7 +457,8 @@ export function createEditor(ui, onEdit) {
       dataView.replaceChildren(element("p", "Данные блока появятся после запуска."));
       return;
     }
-    dataView.replaceChildren(element("p", `${name(selected)} · ${statusNames[current.status]}`));
+    const delivery = deliveryLabels[current.delivery_status];
+    dataView.replaceChildren(element("p", `${name(selected)} · ${delivery ?? statusNames[current.status]}`));
     if (current.input) {
       const sources = current.input.sources.map(name).join(", ") || "Ручной запуск";
       dataView.append(element("p", `Вход из ${sources} · находок ${current.input.count}`));
@@ -342,14 +468,22 @@ export function createEditor(ui, onEdit) {
         dataView.append(details);
       }
     }
-    if (current.output) {
+    if (delivery) {
+      const details = deliveryDetails(current);
+      if (details) dataView.append(element("p", details));
+    } else if (current.output) {
       dataView.append(element("p", `На выходе находок: ${current.output.count}`));
       if (current.output.branch) {
         const match = current.output.matched;
         dataView.append(element("p", `Ветка «${branchNames[current.output.branch]}»${match ? ` · ${match.file}:${match.line} · ${match.severity}` : ""}`));
       }
       if (current.output.findings.length) dataView.append(dataList(current.output));
+      if (Array.isArray(current.output.explanations) && current.output.explanations.length) {
+        dataView.append(element("p", `Объяснений: ${current.output.explanations.length}`),
+          explanationList(current.output.explanations));
+      }
     }
+    if (current.code) dataView.append(element("p", `Код ошибки: ${current.code}`));
     if (current.message) dataView.append(element("p", current.message));
   }
 
@@ -361,27 +495,36 @@ export function createEditor(ui, onEdit) {
     const type = ui["node-type"].value;
     const count = nextId++;
     const index = graph.nodes.filter((item) => item.id.startsWith("block-")).length;
-    const item = { id: `block-${count}`, type, label: `${typeNames[type]} ${count}`, x: 16 + (index % 6) * 140, y: 326 + Math.floor(index / 6) * 108 };
+    const spacing = Math.max(156, Math.floor((stage.offsetWidth - 32 - WIDTH) / 5));
+    const item = { id: `block-${count}`, type, label: `${typeNames[type]} ${count}`, x: 16 + (index % 6) * spacing, y: 326 + Math.floor(index / 6) * 108 };
     if (type === "condition") item.config = { mode: "severity", value: "high" };
+    if (type === "webhook") item.config = { url: "" };
     graph.nodes.push(item);
     selected = item.id;
     pending = null;
     edit();
-    cards.get(item.id).scrollIntoView({ block: "nearest", inline: "nearest" });
+    cards.get(item.id).querySelector(".graph-handle").focus();
   });
   ui["reset-graph"].addEventListener("click", () => {
-    graph = template();
+    graph = template(ui["graph-viewport"].clientWidth || 960);
     selected = "condition";
     pending = null;
     nextId = 1;
-    edit();
+    edit({ resetLayout: true });
     ui["graph-viewport"].scrollTo(0, 0);
   });
-  window.addEventListener("resize", draw);
+  window.addEventListener("resize", resizeStage);
+  const resizeObserver = new ResizeObserver(resizeStage);
+  resizeObserver.observe(ui["graph-viewport"]);
   renderNodes();
 
   return {
     name,
+    clearResults() {
+      events.clear();
+      paintCards();
+      renderData();
+    },
     payload: () => ({ nodes: graph.nodes.map(({ id, type, config }) => ({ id, type, config })), edges: graph.edges }),
     setBusy(value) {
       busy = value;
@@ -398,13 +541,16 @@ export function createEditor(ui, onEdit) {
       renderData();
     },
     showEvent(event) {
-      events.set(event.id, event);
+      const input = event.input ?? events.get(event.id)?.input;
+      events.set(event.id, { ...event, input });
       paintCards();
       if (selected === event.id) renderData();
     },
     finishFailed() {
       for (const [id, event] of events) {
-        if (event.status === "running") events.set(id, { ...event, status: "failed", message: "Выполнение прервано." });
+        if (event.status === "running") {
+          events.set(id, { ...event, status: "failed", delivery_status: undefined, message: "Выполнение прервано." });
+        }
       }
       paintCards();
       renderData();
